@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.local
+
+# Databases & Cache
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+
+# Media & Generated Files
+media/responses/*
+!media/responses/.gitkeep
+*.wav
+*.webm
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Node & Frontend dependencies/builds
+node_modules/
+dist/
+dist-ssr/
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/dist-ssr/
+frontend-react/.env
+frontend-react/.env.local
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/extensions.json
+.idea/
+
+# Large / Temporary internal project folders
+onyx-main/
+myraa-ai-assistant-*/
