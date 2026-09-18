@@ -30,6 +30,11 @@ def execute_connector(connector_id: str, credential: Dict[str, Any]) -> Dict[str
         return {"success": False, "text": "", "error": f"Unknown connector: {connector_id}"}
         
     try:
+        # Cache connector credentials in Redis securely
+        from app.services.redis_service import redis_service
+        if credential:
+            redis_service.set_json(f"lyx:connector:{connector_id}", credential)
+
         # Extract the primary token since older implementations expect a single string
         token = credential.get("token", "")
         

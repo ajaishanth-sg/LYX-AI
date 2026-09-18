@@ -8,7 +8,7 @@ export function MemoryDashboard({ isOpen, onClose }) {
       const saved = localStorage.getItem("lyx_memories");
       return saved ? JSON.parse(saved) : [
         { id: "1", category: "identity", text: "User prefers concise, practical explanations in English and Tamil.", createdAt: new Date().toISOString() },
-        { id: "2", category: "project", text: "Active development on Lyx AI Assistant platform.", createdAt: new Date().toISOString() },
+        { id: "2", category: "project", text: "Active development on Kawaii AI Assistant platform.", createdAt: new Date().toISOString() },
       ];
     } catch {
       return [];

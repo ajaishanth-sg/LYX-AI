@@ -59,6 +59,10 @@ class ConversationTextMessageRequest(BaseModel):
     model_id: Optional[str] = None
 
 
+class SourceChunk(BaseModel):
+    doc_name: str
+    text: str
+
 class ConversationMessageData(BaseModel):
     transcribed_text: str
     response_text: str
@@ -66,6 +70,7 @@ class ConversationMessageData(BaseModel):
     response_audio_base64: Optional[str] = None
     audio_error: Optional[str] = None
     session_id: str
+    sources: Optional[List[SourceChunk]] = None
 
 
 class ConversationEndData(BaseModel):
@@ -116,12 +121,24 @@ class DocumentDeleteResult(BaseModel):
 class CustomModel(BaseModel):
     id: str
     name: str
-    api_key: Optional[str] = ""
-    provider: str
-    base_url: Optional[str] = ""
-
-class CustomModelRequest(BaseModel):
-    name: str
+    display_name: Optional[str] = None
     api_key: Optional[str] = ""
     provider: str = "groq"
     base_url: Optional[str] = ""
+    is_visible: bool = True
+    is_default: bool = False
+    max_input_tokens: Optional[int] = 128000
+    supports_image_input: bool = False
+    supports_reasoning: bool = False
+
+class CustomModelRequest(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    api_key: Optional[str] = ""
+    provider: str = "groq"
+    base_url: Optional[str] = ""
+    is_visible: bool = True
+    is_default: bool = False
+    max_input_tokens: Optional[int] = 128000
+    supports_image_input: bool = False
+    supports_reasoning: bool = False

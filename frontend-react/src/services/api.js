@@ -49,6 +49,11 @@ export async function getModels() {
   return handleResponse(res);
 }
 
+export async function getProviderModels(provider) {
+  const res = await fetch(`${API_BASE}/api/v1/settings/provider-models/${encodeURIComponent(provider)}`);
+  return handleResponse(res);
+}
+
 export async function createModel(name, apiKey, provider, baseUrl) {
   const res = await fetch(`${API_BASE}/api/v1/settings/models`, {
     method: "POST",
@@ -59,7 +64,7 @@ export async function createModel(name, apiKey, provider, baseUrl) {
 }
 
 export async function deleteModel(modelId) {
-  const res = await fetch(`${API_BASE}/api/v1/settings/models/${modelId}`, {
+  const res = await fetch(`${API_BASE}/api/v1/settings/models/${encodeURIComponent(modelId)}`, {
     method: "DELETE",
   });
   return handleResponse(res);

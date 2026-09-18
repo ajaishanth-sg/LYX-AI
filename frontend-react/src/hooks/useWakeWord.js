@@ -37,7 +37,7 @@ export function playWakeChime() {
 
 export function useWakeWord({
   enabled = true,
-  phrase = "hey lyx",
+  phrase = "hey kawaii",
   onWake = () => {},
   isSessionActive = false,
 }) {
@@ -98,7 +98,6 @@ export function useWakeWord({
 
         rec.onresult = (e) => {
           const target = phrase.toLowerCase().trim();
-          const targetWords = target.split(" ");
           
           for (let i = e.resultIndex; i < e.results.length; i++) {
             const res = e.results[i];
@@ -106,12 +105,12 @@ export function useWakeWord({
             for (let j = 0; j < res.length; j++) {
               const transcript = (res[j]?.transcript || "").toLowerCase();
               
-              // Check exact phrase or key word matches (e.g. "hey lyx", "lyx", "hey assistant")
+              // Check explicit phrase or key word matches (e.g. "hey kawaii", "kawaii", "hey assistant")
               const matched = transcript.includes(target) || 
-                              targetWords.some(w => w.length > 2 && transcript.includes(w)) ||
-                              transcript.includes("hey lyx") ||
-                              transcript.includes("lyx") ||
-                              transcript.includes("hey assistant");
+                              transcript.includes("hey kawaii") ||
+                              transcript.includes("hey assistant") ||
+                              transcript.includes("hey lix") ||
+                              transcript.includes("kawaii");
                               
               if (matched) {
                 const now = Date.now();
@@ -133,6 +132,11 @@ export function useWakeWord({
         rec.onerror = (e) => {
           const err = e?.error;
           lastError = err;
+          if (err === "not-allowed" || err === "service-not-allowed") {
+            isIntended = false;
+            setWakeState("disabled");
+            return;
+          }
           if (err !== "no-speech" && err !== "aborted" && err !== "network") {
             setWakeState("error");
           }
@@ -141,7 +145,7 @@ export function useWakeWord({
         rec.onend = () => {
           setIsListening(false);
           if (isIntended && enabled && !isSessionActive) {
-            const delay = lastError === "network" ? 5000 : 300;
+            const delay = lastError === "network" ? 5000 : lastError === "no-speech" ? 1200 : 1000;
             restartTimerRef.current = setTimeout(startListening, delay);
           }
         };

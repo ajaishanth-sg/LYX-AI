@@ -12,7 +12,7 @@ def execute_github_connector(token: str) -> str:
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Lyx-AI-Agent"
+            "User-Agent": "Kawaii-AI-Agent"
         }
         
         # Fetch the authenticated user's info

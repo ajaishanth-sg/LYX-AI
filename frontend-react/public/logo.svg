@@ -1,0 +1,15 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="chevron-hole">
+      <rect width="100" height="100" fill="white" />
+      <polygon points="-10,50 45,22 75,37 75,63 45,78" fill="black" />
+    </mask>
+  </defs>
+  <!-- Rounded hexagon -->
+  <polygon points="28,12 72,12 94,50 72,88 28,88 6,50" 
+           fill="black" 
+           stroke="black" 
+           stroke-width="12" 
+           stroke-linejoin="round"
+           mask="url(#chevron-hole)" />
+</svg>

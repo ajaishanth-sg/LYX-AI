@@ -13,7 +13,7 @@ def run_automation():
     print("Executing system automation routine...")
     time.sleep(0.3)
     status = {
-        "agent": "Lyx System Control",
+        "agent": "Kawaii System Control",
         "action": "Smart Light & Hardware Control",
         "state": "ACTIVE 💡",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")

@@ -48,24 +48,85 @@ export function useTextChat(activeModelId) {
       
       const reader = stream.getReader();
       const decoder = new TextDecoder();
-      let done = false;
-      
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          const chunkText = decoder.decode(value, { stream: true });
+      let accumulatedText = "";
+      let messageSources = null;
+      let messageMapData = null;
+      let renderScheduled = false;
+
+      const scheduleStateUpdate = () => {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(() => {
           setMessages((prev) => {
             const newMessages = [...prev];
             const lastIndex = newMessages.length - 1;
             const lastMessage = newMessages[lastIndex];
             if (lastMessage && lastMessage.role === "assistant") {
-              newMessages[lastIndex] = { ...lastMessage, content: lastMessage.content + chunkText };
+              newMessages[lastIndex] = { 
+                ...lastMessage, 
+                content: accumulatedText, 
+                sources: messageSources,
+                mapData: messageMapData
+              };
             }
             return newMessages;
           });
+          renderScheduled = false;
+        });
+      };
+
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          let eventEnd = buffer.indexOf("\n\n");
+          while (eventEnd !== -1) {
+            const eventBlock = buffer.slice(0, eventEnd);
+            buffer = buffer.slice(eventEnd + 2);
+            eventEnd = buffer.indexOf("\n\n");
+            
+            const lines = eventBlock.split("\n");
+            let currentEvent = null;
+            let currentData = null;
+            
+            for (const line of lines) {
+              if (line.startsWith("event: ")) currentEvent = line.substring(7);
+              else if (line.startsWith("data: ")) currentData = line.substring(6);
+            }
+            
+            if (currentEvent === "sources" && currentData) {
+              try { messageSources = JSON.parse(currentData); } catch (e) {}
+              scheduleStateUpdate();
+            } else if (currentEvent === "map" && currentData) {
+              try { messageMapData = JSON.parse(currentData); } catch (e) {}
+              scheduleStateUpdate();
+            } else if (currentEvent === "content" && currentData) {
+              try { accumulatedText += JSON.parse(currentData); } catch (e) {}
+              scheduleStateUpdate();
+            } else if (currentEvent === "error" && currentData) {
+              try { setErrorMessage(JSON.parse(currentData)); } catch (e) {}
+            }
+          }
         }
+        if (done) break;
       }
+
+      // Final state sync flush
+      setMessages((prev) => {
+        const newMessages = [...prev];
+        const lastIndex = newMessages.length - 1;
+        const lastMessage = newMessages[lastIndex];
+        if (lastMessage && lastMessage.role === "assistant") {
+          newMessages[lastIndex] = { 
+            ...lastMessage, 
+            content: accumulatedText, 
+            sources: messageSources,
+            mapData: messageMapData 
+          };
+        }
+        return newMessages;
+      });
       setIsSending(false);
     } catch (err) {
       console.error("Chat message failed:", err);
@@ -74,7 +135,7 @@ export function useTextChat(activeModelId) {
       setIsSending(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ensureSession, isSending]);
+  }, [ensureSession, isSending, activeModelId]);
 
   const newChatConversation = useCallback(async () => {
     if (sessionIdRef.current) {

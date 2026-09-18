@@ -199,6 +199,15 @@ export function useVAD(onSpeechCaptured) {
     setAmplitude(0);
   }, [stopRecorder]);
 
+  const pauseListening = useCallback(() => {
+    isProcessingRef.current = true;
+    if (isSpeakingRef.current) {
+      isSpeakingRef.current = false;
+      stopRecorder();
+    }
+    setStatus("processing");
+  }, [stopRecorder]);
+
   // resume listening automatically after processing finishes
   const resumeListening = useCallback(() => {
     if (isActiveRef.current) {
@@ -212,5 +221,5 @@ export function useVAD(onSpeechCaptured) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { status, amplitude, start, stop, resumeListening };
+  return { status, amplitude, start, stop, pauseListening, resumeListening };
 }

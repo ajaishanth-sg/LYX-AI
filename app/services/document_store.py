@@ -263,14 +263,20 @@ class DocumentStore:
 
         model = self._ensure_model()
 
+        from app.services.redis_service import redis_service
         query_key = query.strip().lower()
-        if EMBEDDING_CACHE_QUERIES and query_key in self._query_cache:
+
+        redis_cached = redis_service.get_json(f"lyx:query_emb:{query_key}")
+        if redis_cached:
+            query_embedding = np.asarray(redis_cached, dtype=np.float32)
+        elif EMBEDDING_CACHE_QUERIES and query_key in self._query_cache:
             query_embedding = self._query_cache[query_key]
         else:
             query_embedding = model.encode([query], normalize_embeddings=True, show_progress_bar=False)
             query_embedding = np.asarray(query_embedding, dtype=np.float32)
             if EMBEDDING_CACHE_QUERIES:
                 self._query_cache[query_key] = query_embedding
+            redis_service.set_json(f"lyx:query_emb:{query_key}", query_embedding.tolist(), ttl=3600)
 
         k = min(top_k, self._index.ntotal)
         scores, indices = self._index.search(query_embedding, k)

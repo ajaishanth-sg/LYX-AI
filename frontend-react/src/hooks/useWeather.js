@@ -11,7 +11,7 @@ export function useWeather() {
       try {
         // wttr.in — free, no API key needed, CORS-friendly
         const res = await fetch(
-          `https://wttr.in/${lat},${lon}?format=j1`,
+          `http://wttr.in/${lat}${lon ? ',' + lon : ''}?format=j1`,
           { headers: { Accept: "application/json" } }
         );
         if (!res.ok) throw new Error("weather fetch failed");
@@ -46,7 +46,7 @@ export function useWeather() {
 
     if (!navigator.geolocation) {
       // fallback: auto-detect via wttr.in
-      fetch("https://wttr.in/?format=j1", { headers: { Accept: "application/json" } })
+      fetch("http://wttr.in/?format=j1", { headers: { Accept: "application/json" } })
         .then((r) => r.json())
         .then((data) => {
           if (cancelled) return;

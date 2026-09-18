@@ -32,11 +32,79 @@ def init_db():
                         FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
                     )
                 """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS models_config (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        display_name TEXT,
+                        api_key TEXT,
+                        provider TEXT NOT NULL,
+                        base_url TEXT,
+                        is_visible BOOLEAN DEFAULT TRUE,
+                        is_default BOOLEAN DEFAULT FALSE,
+                        max_input_tokens INTEGER DEFAULT 128000,
+                        supports_image_input BOOLEAN DEFAULT FALSE,
+                        supports_reasoning BOOLEAN DEFAULT FALSE,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
             conn.commit()
         logger.info(f"PostgreSQL database initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize PostgreSQL database: {e}")
         raise
+
+def db_load_models() -> List[Dict[str, Any]]:
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning FROM models_config ORDER BY updated_at DESC")
+                rows = cursor.fetchall()
+                if not rows:
+                    return []
+                return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error loading models from PostgreSQL: {e}")
+        return []
+
+def db_save_models(models: List[Dict[str, Any]]) -> None:
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                for m in models:
+                    cursor.execute("""
+                        INSERT INTO models_config (id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            display_name = EXCLUDED.display_name,
+                            api_key = EXCLUDED.api_key,
+                            provider = EXCLUDED.provider,
+                            base_url = EXCLUDED.base_url,
+                            is_visible = EXCLUDED.is_visible,
+                            is_default = EXCLUDED.is_default,
+                            max_input_tokens = EXCLUDED.max_input_tokens,
+                            supports_image_input = EXCLUDED.supports_image_input,
+                            supports_reasoning = EXCLUDED.supports_reasoning,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (
+                        m.get("id"), m.get("name"), m.get("display_name"), m.get("api_key", ""),
+                        m.get("provider", "groq"), m.get("base_url", ""), m.get("is_visible", True),
+                        m.get("is_default", False), m.get("max_input_tokens", 128000),
+                        m.get("supports_image_input", False), m.get("supports_reasoning", False)
+                    ))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error saving models to PostgreSQL: {e}")
+
+def db_delete_model(model_id: str) -> None:
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM models_config WHERE id = %s OR name = %s", (model_id, model_id))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error deleting model from PostgreSQL: {e}")
 
 def create_session(session_id: str, persona_prompt: str, started_at: str):
     with get_connection() as conn:

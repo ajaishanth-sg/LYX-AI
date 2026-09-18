@@ -10,12 +10,35 @@ const IconTrash = () => (
   </svg>
 );
 
+const IconSettings = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3"></circle>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+  </svg>
+);
+
+const IconArrowRight = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="5" y1="12" x2="19" y2="12"></line>
+    <polyline points="12 5 19 12 12 19"></polyline>
+  </svg>
+);
+
 const PRESET_PERSONAS = [
   { label: "Default Assistant", prompt: "" },
   { label: "Teacher", prompt: "Act like a patient school teacher. Ask the student questions one at a time and give simple, encouraging feedback." },
   { label: "Interviewer", prompt: "Act like a professional technical interviewer conducting a mock interview. Ask one question at a time and give brief constructive feedback before moving on." },
   { label: "HR Recruiter", prompt: "Act like a friendly HR recruiter screening a candidate. Ask about background, experience, and motivation." },
   { label: "Coding Mentor", prompt: "Act like a supportive coding mentor. Explain concepts using simple, practical examples." },
+];
+
+const PROVIDER_OPTIONS = [
+  { id: "groq", name: "Groq", company: "Groq", icon: "G" },
+  { id: "gemini", name: "Google Gemini", company: "Google", icon: "✦" },
+  { id: "aws", name: "AWS Bedrock", company: "Amazon", icon: "☁" },
+  { id: "openai", name: "OpenAI", company: "OpenAI", icon: "O" },
+  { id: "ollama", name: "Ollama", company: "Ollama", icon: "🦙" },
+  { id: "local", name: "Custom / Local", company: "Other", icon: "⚙" },
 ];
 
 export default function SettingsPanel({ isOpen, onClose }) {
@@ -25,11 +48,18 @@ export default function SettingsPanel({ isOpen, onClose }) {
   const [status, setStatus] = useState(""); // "", "saving", "saved", "error"
 
   // Custom Model State
+  const [existingModels, setExistingModels] = useState([]);
+  
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState("add"); // "add" | "edit"
+  const [modalProviderId, setModalProviderId] = useState("groq");
+  
   const [modelName, setModelName] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [provider, setProvider] = useState("groq");
   const [baseUrl, setBaseUrl] = useState("");
-  const [existingModels, setExistingModels] = useState([]);
+  const [providerModels, setProviderModels] = useState([]);
+  const [ollamaMode, setOllamaMode] = useState("local"); // "local" | "cloud"
 
   useEffect(() => {
     if (!isOpen) return;
@@ -49,6 +79,43 @@ export default function SettingsPanel({ isOpen, onClose }) {
       .catch((err) => console.error("Failed to load models:", err));
   };
 
+  useEffect(() => {
+    if (!isModalOpen) return;
+
+    if (apiKey.length > 5 || (modalProviderId === "ollama" && (ollamaMode === "local" || baseUrl))) {
+      fetch(`http://127.0.0.1:8000/api/v1/settings/fetch-live-models`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: modalProviderId, api_key: apiKey, base_url: baseUrl })
+      })
+      .then(res => res.json())
+      .then(res => {
+        if (res.success && res.data && res.data.length > 0) {
+          setProviderModels(res.data);
+          // Auto-select first model if none selected
+          if (!modelName && modalMode === "add") {
+            setModelName(res.data[0].id);
+          }
+        } else {
+          setProviderModels([]);
+        }
+      })
+      .catch(err => console.error("Failed to fetch live models:", err));
+    } else {
+      fetch(`http://127.0.0.1:8000/api/v1/settings/provider-models/${modalProviderId}`)
+        .then((res) => res.json())
+        .then((res) => {
+          if (res.success && res.data) {
+            setProviderModels(res.data);
+            if (res.data.length > 0 && !modelName && modalMode === "add") {
+              setModelName(res.data[0].id);
+            }
+          }
+        })
+        .catch((err) => console.error("Failed to load provider models:", err));
+    }
+  }, [isModalOpen, modalProviderId, apiKey, baseUrl, ollamaMode]);
+
   const handleSavePersona = async () => {
     setStatus("saving");
     try {
@@ -65,7 +132,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
   const handleResetPersona = async () => {
     setStatus("saving");
     try {
-      await setPersona(""); // "" = default assistant, no custom persona
+      await setPersona("");
       setPromptText("");
       setSavedPrompt("");
       setStatus("saved");
@@ -76,26 +143,48 @@ export default function SettingsPanel({ isOpen, onClose }) {
     }
   };
 
+  const handleOpenAddModal = (providerId) => {
+    setModalMode("add");
+    setModalProviderId(providerId);
+    setModelName("");
+    setApiKey("");
+    setOllamaMode("local");
+    setBaseUrl(providerId === "ollama" ? "http://localhost:11434" : "");
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (model) => {
+    setModalMode("edit");
+    setModalProviderId(model.provider || "groq");
+    setModelName(model.name);
+    setApiKey(model.api_key || "");
+    setBaseUrl(model.base_url || "");
+    setIsModalOpen(true);
+  };
+
   const handleSaveModel = async () => {
     if (!modelName.trim()) {
       alert("Model Name is required.");
       return;
     }
-    if (provider !== "ollama" && provider !== "local" && !apiKey.trim()) {
-      alert("API Key is required for provider: " + provider);
+    if (modalProviderId !== "ollama" && modalProviderId !== "local" && !apiKey.trim()) {
+      alert("API Key is required for provider: " + modalProviderId);
+      return;
+    }
+    if (modalProviderId === "ollama" && ollamaMode === "cloud" && !apiKey.trim()) {
+      alert("API Key is required for Cloud Ollama.");
       return;
     }
     setStatus("saving_model");
     try {
-      await createModel(modelName.trim(), apiKey.trim(), provider, baseUrl.trim());
+      await createModel(modelName.trim(), apiKey.trim(), modalProviderId, baseUrl.trim());
       setStatus("model_saved");
-      setModelName("");
-      setApiKey("");
-      setProvider("groq");
-      setBaseUrl("");
       fetchModels();
       window.dispatchEvent(new CustomEvent("models-updated"));
-      setTimeout(() => setStatus(""), 2000);
+      setTimeout(() => {
+        setStatus("");
+        setIsModalOpen(false);
+      }, 1000);
     } catch (err) {
       console.error("Failed to save model:", err);
       setStatus("model_error");
@@ -104,7 +193,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
 
   const handleDeleteModel = async (e, modelId) => {
     e.stopPropagation();
-    if (!window.confirm("Are you sure you want to delete this saved model?")) return;
+    if (!window.confirm("Are you sure you want to delete this configured model?")) return;
     try {
       await deleteModel(modelId);
       fetchModels();
@@ -118,197 +207,262 @@ export default function SettingsPanel({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="settings-close" onClick={onClose} aria-label="Close settings">
-            ✕
-          </button>
-        </div>
-
-        <div className="settings-tabs" style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: "20px" }}>
-          <button 
-            style={{ flex: 1, padding: "12px", background: "none", border: "none", borderBottom: activeTab === "profile" ? "2px solid var(--primary)" : "none", fontWeight: activeTab === "profile" ? 600 : 400, cursor: "pointer" }}
-            onClick={() => setActiveTab("profile")}
-          >
-            Profile
-          </button>
-          <button 
-            style={{ flex: 1, padding: "12px", background: "none", border: "none", borderBottom: activeTab === "config" ? "2px solid var(--primary)" : "none", fontWeight: activeTab === "config" ? 600 : 400, cursor: "pointer" }}
-            onClick={() => setActiveTab("config")}
-          >
-            Configuration
-          </button>
-        </div>
-
-        {activeTab === "profile" && (
-          <div>
-            <label className="settings-label">Persona Prompt</label>
-            <p className="settings-hint">
-              Describe how the assistant should behave. This applies to new conversations.
-            </p>
-
-            <div className="settings-presets">
-              {PRESET_PERSONAS.map((preset) => (
-                <button
-                  key={preset.label}
-                  className="preset-chip"
-                  onClick={() => setPromptText(preset.prompt)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-
-            <textarea
-              className="settings-textarea"
-              value={promptText}
-              onChange={(e) => setPromptText(e.target.value)}
-              placeholder="e.g. Act like a technical interviewer conducting a mock interview."
-              rows={6}
-            />
-
-            <div className="settings-actions">
-              <button className="settings-btn-secondary" onClick={handleResetPersona}>
-                Reset
-              </button>
-              <button className="settings-btn-primary" onClick={handleSavePersona} disabled={status === "saving"}>
-                {status === "saving" ? "Saving…" : "Save"}
-              </button>
-            </div>
-
-            {status === "saved" && <p className="settings-status settings-status-success">Saved successfully.</p>}
-            {status === "error" && <p className="settings-status settings-status-error">Failed to save. Try again.</p>}
+    <>
+      <div className="settings-overlay" onClick={onClose}>
+        <div className="settings-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', width: '90vw' }}>
+          <div className="settings-header">
+            <h2>Settings</h2>
+            <button className="settings-close" onClick={onClose} aria-label="Close settings">
+              ✕
+            </button>
           </div>
-        )}
 
-        {activeTab === "config" && (
-          <div>
-            <label className="settings-label">Custom LLM Provider</label>
-            <p className="settings-hint">
-              Add or update a custom LLM provider configuration to use in your chats.
-            </p>
+          <div className="settings-tabs" style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: "20px" }}>
+            <button 
+              style={{ flex: 1, padding: "12px", background: "none", border: "none", borderBottom: activeTab === "profile" ? "2px solid var(--primary)" : "none", fontWeight: activeTab === "profile" ? 600 : 400, cursor: "pointer" }}
+              onClick={() => setActiveTab("profile")}
+            >
+              Profile
+            </button>
+            <button 
+              style={{ flex: 1, padding: "12px", background: "none", border: "none", borderBottom: activeTab === "config" ? "2px solid var(--primary)" : "none", fontWeight: activeTab === "config" ? 600 : 400, cursor: "pointer" }}
+              onClick={() => setActiveTab("config")}
+            >
+              Configuration
+            </button>
+          </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
+          <div style={{ padding: "0 4px 20px" }}>
+            {activeTab === "profile" && (
               <div>
-                <label className="settings-label" style={{ fontSize: "12px", marginBottom: "4px" }}>Model Name</label>
-                <input 
-                  type="text" 
-                  className="settings-textarea" 
-                  style={{ height: "40px", padding: "8px" }}
-                  placeholder="e.g. llama-3.3-70b-versatile"
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="settings-label" style={{ fontSize: "12px", marginBottom: "4px" }}>Provider</label>
-                <select 
-                  className="settings-textarea" 
-                  style={{ height: "40px", padding: "8px" }}
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                >
-                  <option value="groq">Groq</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="aws">AWS Bedrock</option>
-                  <option value="openai">OpenAI (GPT)</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="local">Local / Custom</option>
-                </select>
-              </div>
-              <div>
-                <label className="settings-label" style={{ fontSize: "12px", marginBottom: "4px" }}>API Key</label>
-                <input 
-                  type="password" 
-                  className="settings-textarea" 
-                  style={{ height: "40px", padding: "8px" }}
-                  placeholder="Your API Key"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="settings-label" style={{ fontSize: "12px", marginBottom: "4px" }}>Base URL (Optional)</label>
-                <input 
-                  type="text" 
-                  className="settings-textarea" 
-                  style={{ height: "40px", padding: "8px" }}
-                  placeholder="e.g. https://api.groq.com/openai/v1"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                />
-              </div>
-            </div>
+                <label className="settings-label">Persona Prompt</label>
+                <p className="settings-hint">
+                  Describe how the assistant should behave. This applies to new conversations.
+                </p>
 
-            <div className="settings-actions">
-              <button className="settings-btn-primary" onClick={handleSaveModel} disabled={status === "saving_model"}>
-                {status === "saving_model" ? "Saving…" : "Save / Add Model"}
-              </button>
-            </div>
-
-            {status === "model_saved" && <p className="settings-status settings-status-success">Model saved successfully.</p>}
-            {status === "model_error" && <p className="settings-status settings-status-error">Failed to save model.</p>}
-
-            {existingModels.length > 0 && (
-              <div style={{ marginTop: "24px", borderTop: "1px solid var(--border)", paddingTop: "16px" }}>
-                <label className="settings-label">Configured Models</label>
-                <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0 0", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {existingModels.map((m) => (
-                    <li 
-                      key={m.id} 
-                      onClick={() => {
-                        setModelName(m.name);
-                        setProvider(m.provider);
-                        setApiKey(m.api_key || "");
-                        setBaseUrl(m.base_url || "");
-                      }}
-                      style={{ 
-                        padding: "10px 14px", 
-                        background: "var(--bg-secondary, #f3f4f6)", 
-                        borderRadius: "8px", 
-                        fontSize: "14px", 
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        border: "1px solid var(--border, #e5e7eb)"
-                      }}
+                <div className="settings-presets">
+                  {PRESET_PERSONAS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      className="preset-chip"
+                      onClick={() => setPromptText(preset.prompt)}
                     >
-                      <div>
-                        <strong>{m.name}</strong> <span style={{ color: "var(--text-muted)", fontSize: "12px", marginLeft: "4px" }}>({m.provider})</span>
-                        {m.api_key ? (
-                          <span style={{ fontSize: "11px", display: "block", color: "#10b981", marginTop: "2px" }}>✓ Key configured</span>
-                        ) : (
-                          <span style={{ fontSize: "11px", display: "block", color: "#f59e0b", marginTop: "2px" }}>⚠️ No key set</span>
-                        )}
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteModel(e, m.id)}
-                        title="Delete model"
-                        style={{
-                          background: "transparent",
-                          border: "none",
-                          color: "#ef4444",
-                          padding: "6px",
-                          borderRadius: "6px",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <IconTrash />
-                      </button>
-                    </li>
+                      {preset.label}
+                    </button>
                   ))}
-                </ul>
+                </div>
+
+                <textarea
+                  className="settings-textarea"
+                  value={promptText}
+                  onChange={(e) => setPromptText(e.target.value)}
+                  placeholder="e.g. Act like a technical interviewer conducting a mock interview."
+                  rows={6}
+                />
+
+                <div className="settings-actions">
+                  <button className="settings-btn-secondary" onClick={handleResetPersona}>
+                    Reset
+                  </button>
+                  <button className="settings-btn-primary" onClick={handleSavePersona} disabled={status === "saving"}>
+                    {status === "saving" ? "Saving…" : "Save"}
+                  </button>
+                </div>
+
+                {status === "saved" && <p className="settings-status settings-status-success">Saved successfully.</p>}
+                {status === "error" && <p className="settings-status settings-status-error">Failed to save. Try again.</p>}
+              </div>
+            )}
+
+            {activeTab === "config" && (
+              <div>
+                {existingModels.length > 0 && (
+                  <div style={{ marginBottom: "32px" }}>
+                    <div className="onyx-section-title" style={{ marginTop: 0 }}>Available Providers</div>
+                    <div className="onyx-grid">
+                      {existingModels.map((m) => {
+                        const opt = PROVIDER_OPTIONS.find(o => o.id === m.provider) || PROVIDER_OPTIONS.find(o => o.id === "local");
+                        return (
+                          <div key={m.id} className="onyx-card onyx-card-hoverable" onClick={() => handleOpenEditModal(m)}>
+                            <div className="onyx-card-header">
+                              <div className="onyx-provider-icon">{opt.icon}</div>
+                              <div className="onyx-provider-info">
+                                <div className="onyx-provider-name">{m.name}</div>
+                                <div className="onyx-provider-company">{opt.company}</div>
+                              </div>
+                              {m.api_key && m.api_key !== "dummy-key" ? (
+                                <span className="onyx-badge">Configured</span>
+                              ) : (
+                                <span className="onyx-badge" style={{ background: '#fef3c7', color: '#b45309' }}>No Key</span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '16px', alignSelf: 'flex-end' }}>
+                              <button className="onyx-btn-secondary" onClick={(e) => handleDeleteModel(e, m.id)} style={{ padding: '6px' }} title="Delete provider">
+                                <IconTrash />
+                              </button>
+                              <button className="onyx-btn-secondary" onClick={(e) => { e.stopPropagation(); handleOpenEditModal(m); }} style={{ padding: '6px' }} title="Edit provider">
+                                <IconSettings />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="onyx-section-title">Add Provider</div>
+                  <p className="settings-hint" style={{ marginBottom: '16px' }}>Configure a new LLM provider by selecting from the options below.</p>
+                  
+                  <div className="onyx-grid">
+                    {PROVIDER_OPTIONS.map((opt) => (
+                      <div key={opt.id} className="onyx-card onyx-card-hoverable" onClick={() => handleOpenAddModal(opt.id)}>
+                        <div className="onyx-card-header">
+                          <div className="onyx-provider-icon">{opt.icon}</div>
+                          <div className="onyx-provider-info">
+                            <div className="onyx-provider-name">{opt.name}</div>
+                            <div className="onyx-provider-company">{opt.company}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', marginTop: '16px', alignSelf: 'flex-end' }}>
+                          <button className="onyx-btn-secondary" onClick={(e) => { e.stopPropagation(); handleOpenAddModal(opt.id); }}>
+                            {opt.isCustom ? "Set Up" : "Connect"} <IconArrowRight />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
-    </div>
+
+      {isModalOpen && (
+        <div className="onyx-modal-overlay" onClick={() => setIsModalOpen(false)}>
+          <div className="onyx-modal" onClick={e => e.stopPropagation()}>
+            <div className="onyx-modal-header">
+              <div className="onyx-modal-title">
+                {modalMode === "add" ? "Connect Provider" : "Edit Provider"}
+              </div>
+              <button className="onyx-modal-close" onClick={() => setIsModalOpen(false)}>✕</button>
+            </div>
+            
+            <div className="onyx-modal-body">
+              <div>
+                <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>Model Name</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <select 
+                    className="settings-textarea" 
+                    style={{ height: "40px", padding: "8px 12px" }}
+                    value={providerModels.some(m => m.id === modelName) ? modelName : "custom"}
+                    onChange={(e) => {
+                      if (e.target.value === "custom") {
+                        setModelName("");
+                      } else {
+                        setModelName(e.target.value);
+                      }
+                    }}
+                  >
+                    {providerModels.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                    <option value="custom">Custom (Type below)</option>
+                  </select>
+                  
+                  {!providerModels.some(m => m.id === modelName) && (
+                    <input 
+                      type="text" 
+                      className="settings-textarea" 
+                      style={{ height: "40px", padding: "8px 12px" }}
+                      placeholder="Enter model ID (e.g., my-local-model)"
+                      value={modelName}
+                      onChange={(e) => setModelName(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {modalProviderId === "ollama" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <label className="settings-label" style={{ fontSize: "13px", marginBottom: "8px", display: "block" }}>Ollama Mode</label>
+                  <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "14px" }}>
+                      <input 
+                        type="radio" 
+                        name="ollamaMode" 
+                        value="local" 
+                        checked={ollamaMode === "local"} 
+                        onChange={() => {
+                          setOllamaMode("local");
+                          setBaseUrl("http://localhost:11434");
+                          setApiKey("");
+                        }} 
+                      />
+                      Local
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "14px" }}>
+                      <input 
+                        type="radio" 
+                        name="ollamaMode" 
+                        value="cloud" 
+                        checked={ollamaMode === "cloud"} 
+                        onChange={() => {
+                          setOllamaMode("cloud");
+                          setBaseUrl("https://ollama.com/v1");
+                        }} 
+                      />
+                      Cloud
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {(modalProviderId !== "ollama" || ollamaMode === "cloud") && (
+                <div>
+                  <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>API Key</label>
+                  <input 
+                    type="password" 
+                    className="settings-textarea" 
+                    style={{ height: "40px", padding: "8px 12px" }}
+                    placeholder="Your API Key"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Required for most external providers. Leave blank for local models.</p>
+                </div>
+              )}
+
+              {(modalProviderId === "local" || modalProviderId === "ollama") && (
+                <div>
+                  <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>Base URL {ollamaMode === "local" ? "" : "(Optional)"}</label>
+                  <input 
+                    type="text" 
+                    className="settings-textarea" 
+                    placeholder={modalProviderId === "ollama" && ollamaMode === "local" ? "http://localhost:11434" : "e.g. https://api.mycloud.com/v1"}
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    disabled={modalProviderId === "ollama" && ollamaMode === "local"}
+                    style={modalProviderId === "ollama" && ollamaMode === "local" ? { backgroundColor: "var(--bg-secondary)", opacity: 0.7, height: "40px", padding: "8px 12px" } : { height: "40px", padding: "8px 12px" }}
+                  />
+                </div>
+              )}
+
+              {status === "model_saved" && <p className="settings-status settings-status-success" style={{ margin: 0 }}>Model saved successfully.</p>}
+              {status === "model_error" && <p className="settings-status settings-status-error" style={{ margin: 0 }}>Failed to save model.</p>}
+            </div>
+
+            <div className="onyx-modal-footer">
+              <button className="onyx-btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
+              <button className="settings-btn-primary" onClick={handleSaveModel} disabled={status === "saving_model"}>
+                {status === "saving_model" ? "Saving…" : "Save Model"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -5,59 +5,86 @@ const ThemeContext = createContext();
 export const useTheme = () => useContext(ThemeContext);
 
 const DEFAULT_THEME = {
-  mode: "dark", // "system" | "light" | "dark"
-  bgEnabled: true,
-  bgImage: "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?auto=format&fit=crop&w=1200&q=80",
+  version: 4,
+  mode: "light",
+  bgEnabled: false,
+  bgImage: null,
   overlayColor: "transparent",
   bgBlur: false,
-  applyToAll: true,
+  applyToAll: false,
   chatColorEnabled: false,
   fontSize: 15,
-  textColor: "#0f172a",
-  sidebarColor: "#ffffff",
-  chatBgColor: "#ffffff",
-  userBubbleColor: "#ffffff",
+};
+
+const THEME_STORAGE_KEY = 'lyx-theme-v2';
+
+const normalizeTheme = (savedTheme) => {
+  const parsed = typeof savedTheme === 'string' ? JSON.parse(savedTheme) : savedTheme;
+  const theme = { ...DEFAULT_THEME, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+
+  if (theme.version !== DEFAULT_THEME.version || theme.bgEnabled) {
+    theme.version = DEFAULT_THEME.version;
+    theme.mode = "light";
+    theme.bgEnabled = false;
+    theme.bgImage = null;
+    theme.overlayColor = "transparent";
+    theme.bgBlur = false;
+    theme.applyToAll = false;
+    theme.chatColorEnabled = false;
+  }
+
+  return theme;
 };
 
 export const ThemeProvider = ({ children }) => {
   const [theme, setThemeState] = useState(() => {
-    const saved = localStorage.getItem('lyx-theme-v2');
-    return saved ? JSON.parse(saved) : DEFAULT_THEME;
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved) {
+        const migrated = normalizeTheme(saved);
+        localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(migrated));
+        return migrated;
+      }
+    } catch (error) {
+      console.warn('Unable to load appearance settings', error);
+    }
+
+    return DEFAULT_THEME;
   });
 
   const setTheme = (newThemeOrUpdater) => {
     setThemeState((prev) => {
       const updated = typeof newThemeOrUpdater === 'function' ? newThemeOrUpdater(prev) : newThemeOrUpdater;
-      localStorage.setItem('lyx-theme-v2', JSON.stringify(updated));
-      return updated;
+      const normalized = normalizeTheme(updated);
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(normalized));
+      return normalized;
     });
   };
 
   const resetTheme = () => {
+    localStorage.removeItem(THEME_STORAGE_KEY);
     setThemeState(DEFAULT_THEME);
-    localStorage.removeItem('lyx-theme-v2');
   };
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme.mode === "dark") {
-      root.classList.add("dark-mode");
-      root.classList.remove("light-mode");
-    } else if (theme.mode === "light") {
-      root.classList.add("light-mode");
-      root.classList.remove("dark-mode");
-    }
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const isDark = theme.mode === 'dark' || (theme.mode === 'system' && mediaQuery.matches);
 
-    if (theme.bgEnabled && theme.bgImage) {
-      root.style.setProperty('--app-bg-image', `url(${theme.bgImage})`);
-      root.style.setProperty('--app-bg-overlay', theme.overlayColor || 'transparent');
-      root.style.setProperty('--app-bg-blur', theme.bgBlur ? 'blur(16px)' : 'none');
-    } else {
+      root.classList.toggle('dark-mode', isDark);
+      root.classList.toggle('light-mode', !isDark);
+      root.classList.toggle('dark', isDark);
+      root.style.colorScheme = isDark ? 'dark' : 'light';
       root.style.setProperty('--app-bg-image', 'none');
       root.style.setProperty('--app-bg-overlay', 'transparent');
       root.style.setProperty('--app-bg-blur', 'none');
-    }
-  }, [theme]);
+    };
+
+    applyTheme();
+    mediaQuery.addEventListener('change', applyTheme);
+    return () => mediaQuery.removeEventListener('change', applyTheme);
+  }, [theme.mode]);
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme, resetTheme }}>

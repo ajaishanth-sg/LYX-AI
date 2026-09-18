@@ -138,10 +138,9 @@ export default function Sidebar({
         {!collapsed && (
           <div className="synapse-sidebar__brand">
             <div className="synapse-brand-icon">
-              <img src="/logo.png" alt="Lyx" style={{ width: 18, height: 18, objectFit: "contain" }} onError={e => e.target.style.display='none'} />
-              <span className="synapse-brand-fallback">⚡</span>
+              <img src="/logo_transparent.png" alt="Kawaii AI" style={{ width: 24, height: 24, objectFit: "contain" }} />
             </div>
-            <span className="synapse-brand-name">Lyx</span>
+            <span className="synapse-brand-name">Kawaii AI</span>
           </div>
         )}
         <div className="synapse-sidebar__topbar-actions">
@@ -159,7 +158,7 @@ export default function Sidebar({
         <div className="synapse-sidebar__collapsed-nav">
           <button className="synapse-icon-btn synapse-icon-btn--lg" onClick={onNewConversation} title="New Chat"><IconEdit /></button>
           <button className="synapse-icon-btn synapse-icon-btn--lg" title="Home"><IconHome /></button>
-          <button className="synapse-icon-btn synapse-icon-btn--lg" title="Explore"><IconExplore /></button>
+          <button className="synapse-icon-btn synapse-icon-btn--lg" onClick={onNavigateConnectors} title="Plugins"><IconExplore /></button>
           <button className="synapse-icon-btn synapse-icon-btn--lg" onClick={onOpenSettings} title="Settings"><IconSettings /></button>
         </div>
       ) : (
@@ -173,7 +172,7 @@ export default function Sidebar({
             </button>
             <button className="synapse-nav-item" onClick={onNavigateConnectors}>
               <span className="synapse-nav-icon"><IconExplore /></span>
-              <span>Explore Lyx AI</span>
+              <span>Plugins</span>
             </button>
           </div>
 
@@ -239,7 +238,7 @@ export default function Sidebar({
           {!collapsed && (
             <>
               <div className="synapse-user-info">
-                <span className="synapse-user-name">Lyx User</span>
+                <span className="synapse-user-name">Kawaii User</span>
                 <span className="synapse-user-plan">Free Plan</span>
               </div>
               <IconChevron />

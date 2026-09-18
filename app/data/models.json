@@ -1,16 +1,67 @@
 [
   {
-    "id": "llama-3.3-70b-versatile",
-    "name": "llama-3.3-70b-versatile",
+    "id": "nemotron-3-nano:30b",
+    "name": "nemotron-3-nano:30b",
+    "display_name": "Nemotron 3 Nano 30B (Ollama Cloud)",
     "api_key": "",
-    "provider": "groq",
-    "base_url": ""
+    "provider": "ollama",
+    "base_url": "https://ollama.com/v1",
+    "is_visible": true,
+    "is_default": false,
+    "max_input_tokens": 128000,
+    "supports_image_input": false,
+    "supports_reasoning": false
   },
   {
-    "id": "llama-3.1-8b-instant",
-    "name": "llama-3.1-8b-instant",
+    "id": "ollama",
+    "name": "ollama",
+    "display_name": "ollama",
+    "api_key": "",
+    "provider": "local",
+    "base_url": "",
+    "is_visible": true,
+    "is_default": false,
+    "max_input_tokens": 128000,
+    "supports_image_input": false,
+    "supports_reasoning": false
+  },
+  {
+    "id": "qwen/qwen3.8-27b",
+    "name": "qwen/qwen3.8-27b",
+    "display_name": "qwen/qwen3.8-27b",
     "api_key": "",
     "provider": "groq",
-    "base_url": ""
+    "base_url": "",
+    "is_visible": true,
+    "is_default": false,
+    "max_input_tokens": 128000,
+    "supports_image_input": false,
+    "supports_reasoning": false
+  },
+  {
+    "id": "kimi-k2.7-code",
+    "name": "kimi-k2.7-code",
+    "display_name": "kimi-k2.7-code",
+    "api_key": "",
+    "provider": "ollama",
+    "base_url": "https://ollama.com/v1",
+    "is_visible": true,
+    "is_default": false,
+    "max_input_tokens": 128000,
+    "supports_image_input": false,
+    "supports_reasoning": false
+  },
+  {
+    "id": "gpt-oss:120b",
+    "name": "gpt-oss:120b",
+    "display_name": "gpt-oss:120b",
+    "api_key": "",
+    "provider": "ollama",
+    "base_url": "https://ollama.com/v1",
+    "is_visible": true,
+    "is_default": false,
+    "max_input_tokens": 128000,
+    "supports_image_input": false,
+    "supports_reasoning": false
   }
 ]

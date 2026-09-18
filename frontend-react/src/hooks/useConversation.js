@@ -5,7 +5,7 @@ import { sendMessage, startConversation, endConversation, API_BASE } from "../se
 
 import { useWakeWord } from "./useWakeWord";
 
-export function useConversation() {
+export function useConversation({ activeModelId = null, wakeWordEnabled = true } = {}) {
   const [sessionId, setSessionId] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -40,17 +40,18 @@ export function useConversation() {
     setCaptionRole(null);
 
     try {
-      const data = await sendMessage(currentSessionId, audioBlob);
+      const data = await sendMessage(currentSessionId, audioBlob, activeModelId);
       setCaptionText(data.transcribed_text);
       setCaptionRole("user");
       await new Promise((resolve) => setTimeout(resolve, 600));
 
-      fullResponseWordsRef.current = data.response_text.split(" ");
+      fullResponseWordsRef.current = data.response_text ? data.response_text.split(" ") : [];
       setCaptionRole("assistant");
 
       if (data.response_audio_base64 || data.response_audio_url) {
         setCaptionText("");
         isAiSpeakingRef.current = true;
+        vad.pauseListening();
         setErrorMessage(null);
         if (audioPlayerRef.current) {
           audioPlayerRef.current.src = data.response_audio_base64
@@ -80,7 +81,7 @@ export function useConversation() {
       vad.resumeListening();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeModelId]);
 
   const vad = useVAD(handleSpeechCaptured);
 
@@ -127,9 +128,11 @@ export function useConversation() {
     if (!isAiSpeakingRef.current || !liveTranscript.liveText) return;
 
     const interruptionWords = ["stop", "wait", "wait a minute", "hold on", "shut up", "quiet", "pause"];
-    const lowerText = liveTranscript.liveText.toLowerCase();
+    const lowerText = liveTranscript.liveText.toLowerCase().trim();
     
-    const isInterruption = interruptionWords.some(word => lowerText.includes(word)) || liveTranscript.liveText.trim().length > 3;
+    const isExplicitStop = interruptionWords.some(word => lowerText.includes(word));
+    const isLongSpeech = lowerText.length > 18 && lowerText.split(" ").length >= 4;
+    const isInterruption = isExplicitStop || isLongSpeech;
     
     if (isInterruption && audioPlayerRef.current) {
       audioPlayerRef.current.pause();
@@ -186,10 +189,10 @@ export function useConversation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Hands-free Wake Word Detection ("Hey Lyx" / "Hey Assistant")
+  // Hands-free Wake Word Detection ("hey kawaii" / "Hey Assistant")
   const wakeWord = useWakeWord({
-    enabled: true,
-    phrase: "hey lyx",
+    enabled: wakeWordEnabled && !isSessionActive,
+    phrase: "hey kawaii",
     onWake: beginConversation,
     isSessionActive,
   });

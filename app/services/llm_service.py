@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 LLM_REQUEST_TIMEOUT_SECONDS = 20
 
 BASE_SYSTEM_INSTRUCTIONS = (
-    "You are Lyx, a helpful AI assistant. "
+    "You are Kawaii, a helpful AI assistant. "
     "Always respond in clear, natural English regardless of what language the user writes in. "
     "Keep responses conversational, clear, and well-structured. "
     "FORMATTING & LISTING RULE: When the user asks for projects, repositories, or lists of items (e.g., 'give me the project in list', 'list my repos', 'show projects'), ALWAYS present them in a clean Markdown Table (`| Repository Name | Full Name | Description | Language | Stars |`). "
@@ -104,28 +104,43 @@ class LLMService:
         return messages
 
     def _resolve_model_config(self, model_id: Optional[str]):
+        from app.services.redis_service import redis_service
+
         api_key = self._default_api_key
         model_name = self._default_model
         base_url = None
+
+        # Check Redis for a globally configured active API key
+        redis_api_key = redis_service.get("lyx:global_api_key")
+        if redis_api_key and redis_api_key.strip():
+            api_key = redis_api_key.strip()
 
         custom_model = get_model(model_id)
         if custom_model:
             key = (custom_model.get("api_key") or "").strip()
             if key and key not in ("test-key", "your-api-key", "dummy"):
                 api_key = key
-            base_url = custom_model.get("base_url") or None
-            provider = custom_model.get("provider", "groq").lower()
-            raw_model_name = custom_model["name"]
+            
+            raw_base = custom_model.get("base_url") or ""
+            base_url = raw_base.strip() or None
 
-            if provider == "groq" and not raw_model_name.startswith("groq/"):
-                model_name = f"groq/{raw_model_name}"
-            elif provider == "gemini" and not raw_model_name.startswith("gemini/"):
-                model_name = f"gemini/{raw_model_name}"
-            elif provider == "aws" and not raw_model_name.startswith("bedrock/"):
-                model_name = f"bedrock/{raw_model_name}"
-            elif provider == "ollama" and not raw_model_name.startswith("ollama/"):
-                model_name = f"ollama/{raw_model_name}"
-            elif provider == "openai":
+            provider = (custom_model.get("provider") or "groq").lower()
+            raw_model_name = (custom_model.get("name") or "").strip()
+
+            if provider == "groq":
+                model_name = raw_model_name if raw_model_name.startswith("groq/") else f"groq/{raw_model_name}"
+            elif provider == "gemini":
+                model_name = raw_model_name if raw_model_name.startswith("gemini/") else f"gemini/{raw_model_name}"
+            elif provider == "aws":
+                model_name = raw_model_name if raw_model_name.startswith("bedrock/") else f"bedrock/{raw_model_name}"
+            elif provider == "ollama":
+                if base_url and any(x in base_url.lower() for x in ["/v1", "/v2", "/v3", "openai"]):
+                    model_name = raw_model_name if raw_model_name.startswith("openai/") else f"openai/{raw_model_name}"
+                else:
+                    model_name = raw_model_name if raw_model_name.startswith("ollama/") else f"ollama/{raw_model_name}"
+                if not base_url:
+                    base_url = "http://localhost:11434"
+            elif provider in ("openai", "local"):
                 model_name = raw_model_name
             else:
                 model_name = raw_model_name
@@ -252,5 +267,12 @@ class LLMService:
                 delta = chunk.choices[0].delta.content
                 if delta:
                     yield delta
-        except Exception:
-            raise
+        except Exception as e:
+            logger.error(f"Error in LLM stream generation: {e}")
+            err_str = str(e)
+            if "invalid_api_key" in err_str or "Invalid API Key" in err_str or "AuthenticationError" in err_str:
+                yield "⚠️ Invalid API Key: The API key for your selected model is invalid or missing. Please enter a valid API key in Settings → Configuration."
+            elif "OllamaException" in err_str or "11434" in err_str:
+                yield "⚠️ Ollama Not Available: Could not connect to local Ollama on port 11434. Please start Ollama or select a Groq model."
+            else:
+                yield f"⚠️ Response Error: {err_str}"

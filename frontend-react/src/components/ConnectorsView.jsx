@@ -355,10 +355,10 @@ export default function ConnectorsView() {
     <div className="connectors-workspace-view" style={{ padding: "28px 40px", width: "100%", height: "100%", boxSizing: "border-box" }}>
       <div className="connectors-header" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", marginBottom: "28px" }}>
         <h2 style={{ fontSize: "22px", fontWeight: 700, color: "var(--text-primary)" }}>
-          {selectedPlugin ? selectedPlugin.name : "Integrations & Connectors"}
+          {selectedPlugin ? selectedPlugin.name : "Plugins & Integrations"}
         </h2>
         <p style={{ color: "var(--text-secondary)", marginTop: "6px", fontSize: "14px" }}>
-          Connect remote data sources. Indexed connector content is automatically synthesized into responses.
+          Connect remote data sources & plugins. Indexed content is automatically synthesized into responses.
         </p>
       </div>
 
@@ -629,7 +629,7 @@ export default function ConnectorsView() {
             /* Setup / Edit Form */
             <div>
               <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginBottom: "20px" }}>
-                Enter your credentials for <b>{selectedPlugin.name}</b> and choose how frequently you want Lyx to automatically fetch newly added content.
+                Enter your credentials for <b>{selectedPlugin.name}</b> and choose how frequently you want Kawaii to automatically fetch newly added content.
               </p>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginBottom: "24px" }}>

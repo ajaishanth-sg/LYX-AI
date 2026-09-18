@@ -49,21 +49,30 @@ const IconSettings = () => (
 );
 
 export default function App() {
+  const [mode, setMode] = useState("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [systemAgentOpen, setSystemAgentOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
-  const [mode, setMode] = useState("chat");
-  const [activeModelId, setActiveModelId] = useState(null);
+  const [activeModelId, setActiveModelId] = useState(() => {
+    return localStorage.getItem("lyx_active_model_id") || null;
+  });
+
+  const handleSelectModel = (modelId) => {
+    setActiveModelId(modelId);
+    if (modelId) {
+      localStorage.setItem("lyx_active_model_id", modelId);
+    }
+  };
 
   const {
     errorMessage, isSessionActive, vadStatus, amplitude,
     audioPlayerRef, captionText, captionRole,
     beginConversation, endCurrentConversation,
     isWakeListening, wakeState,
-  } = useConversation();
+  } = useConversation({ activeModelId, wakeWordEnabled: mode === "voice" });
 
   const {
     messages: chatMessages, isSending: isChatSending,
@@ -93,7 +102,7 @@ export default function App() {
   };
   const pageTitle = chatMessages.length > 0
     ? chatMessages[0].content.slice(0, 40) + (chatMessages[0].content.length > 40 ? "…" : "")
-    : mode === "voice" ? "Voice Mode" : mode === "connectors" ? "Connectors" : "";
+    : mode === "voice" ? "Voice Mode" : mode === "connectors" ? "Plugins" : "";
 
   return (
     <div className="app-shell">
@@ -107,7 +116,7 @@ export default function App() {
         onModeChange={handleModeChange}
         chatMessages={chatMessages}
         activeModelId={activeModelId}
-        onSelectModel={setActiveModelId}
+        onSelectModel={handleSelectModel}
       />
 
       {/* Main content */}
@@ -125,8 +134,6 @@ export default function App() {
             </button>
             <button className="topbar-icon-btn" title="Settings" onClick={() => setSettingsOpen(true)}><IconSettings /></button>
             <button className="topbar-icon-btn" title="Share"><IconShare /></button>
-            <button className="topbar-icon-btn" title="Star"><IconStar /></button>
-            <button className="topbar-icon-btn" title="Bookmark"><IconBookmark /></button>
           </div>
         </header>
 
@@ -282,11 +289,11 @@ export default function App() {
 
             {/* STAGE HEADER */}
             <div style={{ textAlign: "center", marginTop: "12px" }}>
-              <h1 className="voice-stage-title" style={{ fontSize: "24px", fontWeight: "600", letterSpacing: "0.05em" }}>Lyx — Hands-Free Voice Agent</h1>
+              <h1 className="voice-stage-title" style={{ fontSize: "24px", fontWeight: "600", letterSpacing: "0.05em" }}>Kawaii — Hands-Free Voice Agent</h1>
               {!isSessionActive && isWakeListening && (
                 <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", margin: "8px 0", padding: "4px 12px", borderRadius: "999px", background: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.3)", color: "#10b981", fontSize: "12px", fontWeight: "500" }}>
                   <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
-                  <span>Hands-free active — Say &ldquo;Hey Lyx&rdquo; to start</span>
+                  <span>Hands-free active — Say &ldquo;Hey Kawaii&rdquo; to start</span>
                 </div>
               )}
             </div>
@@ -331,7 +338,7 @@ export default function App() {
             onSend={sendChatMessage}
             onVoiceMode={() => handleModeChange("voice")}
             activeModelId={activeModelId}
-            onSelectModel={setActiveModelId}
+            onSelectModel={handleSelectModel}
           />
         )}
       </main>

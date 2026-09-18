@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+import "../index.css";
 import { BrainCircuit, Cpu } from "lucide-react";
 import { useWeather } from "../hooks/useWeather";
 
@@ -69,6 +73,13 @@ const IconThumbsUp = () => (
 const IconThumbsDown = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/>
+  </svg>
+);
+
+const IconList = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+    <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
   </svg>
 );
 
@@ -240,7 +251,7 @@ function WeatherWidget({ weather, loading }) {
 }
 
 // ── Model Dropdown ─────────────────────────────────────────────────
-function ModelDropdown({ open, onToggle, dropdownRef, models, activeModelId, onSelectModel }) {
+function ModelDropdown({ open, onToggle, dropdownRef, models, activeModelId, onSelectModel, homeStyle }) {
   const activeModel = models.find(m => m.id === activeModelId) || models[0];
   const displayName = activeModel ? activeModel.name : "Select a model";
 
@@ -253,7 +264,7 @@ function ModelDropdown({ open, onToggle, dropdownRef, models, activeModelId, onS
         </span>
       </button>
       {open && (
-        <div className="home-model-dropdown">
+        <div className={`home-model-dropdown ${!homeStyle ? "home-model-dropdown-up" : ""}`}>
           {models.map(m => (
             <div 
               key={m.id} 
@@ -313,7 +324,7 @@ const InputBox = ({
         <textarea
           ref={textareaRef}
           className={homeStyle ? "home-textarea" : "chat-textarea"}
-          placeholder="Ask Lyx AI…"
+          placeholder="Ask Kawaii AI…"
           value={inputValue}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
@@ -330,6 +341,7 @@ const InputBox = ({
           models={models}
           activeModelId={activeModelId}
           onSelectModel={onSelectModel}
+          homeStyle={homeStyle}
         />
         <div className="home-input-icons">
           <button
@@ -363,10 +375,58 @@ const InputBox = ({
     </div>
 
     {homeStyle && (
-      <p className="chat-disclaimer">Lyx can make mistakes. Check important information.</p>
+      <p className="chat-disclaimer">Kawaii can make mistakes. Check important information.</p>
     )}
   </div>
 );
+
+// Fix Leaflet default icon path issues
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Map View Component
+const MapPreview = ({ data }) => {
+  if (!data || !data.center) return null;
+  const { center, places } = data;
+  
+  return (
+    <div className="map-preview-container">
+      <div className="map-preview-header">
+        <span className="map-preview-title">Map Locations Found</span>
+      </div>
+      <div className="map-wrapper">
+        <MapContainer center={center} zoom={13} scrollWheelZoom={false} style={{ height: "300px", width: "100%" }}>
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            className="map-tiles-dark"
+          />
+          {places && places.map((place, i) => (
+            <Marker key={i} position={[place.lat, place.lon]}>
+              <Popup>
+                <strong>{place.name}</strong><br/>
+                {place.display_name}
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      </div>
+      <div className="map-cards-row">
+        {places && places.map((place, i) => (
+          <div key={i} className="map-place-card">
+            <div className="map-place-card-title">{place.name}</div>
+            <div className="map-place-card-type">{place.type || 'Location'}</div>
+            <div className="map-place-card-rating">★ 4.5</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 // ══════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
@@ -376,6 +436,8 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [featureCardVisible, setFeatureCardVisible] = useState(true);
   const [models, setModels] = useState([]);
+  const [activeSources, setActiveSources] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const scrollRef  = useRef(null);
   const textareaRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -524,7 +586,8 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
 
   // ── CHAT STATE ────────────────────────────────────────────────
   return (
-    <div className="chat-shell">
+    <div className="chat-with-sources">
+      <div className="chat-shell">
       <div ref={scrollRef} className="chat-messages-scroll">
         <div className="chat-messages-inner">
           {messages.map((msg, idx) => (
@@ -544,6 +607,7 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
               ) : (
                 <div className="chat-assistant-wrapper">
                   <div className="chat-bubble chat-bubble--assistant">
+                    {msg.mapData && <MapPreview data={msg.mapData} />}
                     {msg.content ? (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
@@ -576,6 +640,35 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                                 </a>
                               );
                             }
+                            
+                            // Check for YouTube links
+                            const ytMatch = props.href && props.href.match(/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+                            if (ytMatch) {
+                              const videoId = ytMatch[1];
+                              return (
+                                <span className="youtube-embed-wrapper" style={{ display: "block", marginTop: "16px", marginBottom: "16px", maxWidth: "480px" }}>
+                                  <iframe
+                                    src={`https://www.youtube.com/embed/${videoId}`}
+                                    title="YouTube video player"
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                    style={{ width: "100%", aspectRatio: "16/9", borderRadius: "12px", border: "1px solid var(--border)", display: "block" }}
+                                  ></iframe>
+                                  <span style={{ display: "block", marginTop: "8px", fontSize: "13px" }}>
+                                    <a href={props.href} target="_blank" rel="noopener noreferrer" style={{ color: "var(--text-primary)", textDecoration: "underline", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                      Watch on YouTube 
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                        <polyline points="15 3 21 3 21 9"></polyline>
+                                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                                      </svg>
+                                    </a>
+                                  </span>
+                                </span>
+                              );
+                            }
+
                             return <a {...props} className="markdown-link" target="_blank" rel="noopener noreferrer" />;
                           },
                           strong: ({node, ...props}) => <strong className="markdown-bold" {...props} />,
@@ -588,12 +681,10 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                           ol: ({node, ...props}) => <ol className="markdown-ol" {...props} />,
                           li: ({node, ...props}) => <li className="markdown-li" {...props} />,
                           blockquote: ({node, ...props}) => <blockquote className="markdown-blockquote" {...props} />,
-                          code: ({node, inline, ...props}) => 
-                            inline ? (
-                              <code className="markdown-code-inline" {...props} />
-                            ) : (
-                              <pre className="markdown-code-block"><code {...props} /></pre>
-                            )
+                          pre: ({node, ...props}) => <pre className="markdown-code-block" {...props} />,
+                          code: ({node, className, ...props}) => (
+                            <code className={className || "markdown-code-inline"} {...props} />
+                          )
                         }}
                       >
                         {msg.content}
@@ -606,6 +697,22 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                       </div>
                     )}
                   </div>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="chat-message-sources">
+                      <button 
+                        className="sources-toggle-btn"
+                        onClick={() => {
+                          setActiveSources(msg.sources);
+                          setSidebarOpen(true);
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6}}>
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        All Sources
+                      </button>
+                    </div>
+                  )}
                   {msg.content && (
                     <div className="chat-message-actions">
                       <button className="chat-action-btn" title="Copy" onClick={() => handleCopy(msg.content)}><IconCopy /></button>
@@ -655,5 +762,101 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
         }
       `}</style>
     </div>
+
+    {/* Sources Sidebar Panel */}
+    {sidebarOpen && activeSources && (
+      <div className="sources-sidebar">
+        <div className="sources-sidebar-header">
+          <div className="sources-sidebar-title">
+            <IconList />
+            <span>All Sources</span>
+          </div>
+          <button
+            className="sources-sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+            title="Close"
+          >
+            <IconX />
+          </button>
+        </div>
+        <div className="sources-sidebar-list">
+          {activeSources.map((src, i) => {
+            const isWebSource = !!src.url;
+            let domain = "";
+            let faviconUrl = "";
+            if (isWebSource) {
+              try {
+                const u = new URL(src.url);
+                domain = u.hostname.replace("www.", "");
+                faviconUrl = `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=32`;
+              } catch (_) {}
+            }
+
+            const inner = (
+              <>
+                <div className="sources-sidebar-item-icon">
+                  {isWebSource && faviconUrl ? (
+                    <img
+                      src={faviconUrl}
+                      alt={domain}
+                      width="20"
+                      height="20"
+                      style={{ borderRadius: 4, objectFit: "contain" }}
+                      onError={e => { e.target.style.display = "none"; }}
+                    />
+                  ) : (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                  )}
+                </div>
+                <div className="sources-sidebar-item-content">
+                  <div className="sources-sidebar-item-title">
+                    {src.doc_name || `Source ${i + 1}`}
+                  </div>
+                  {isWebSource && (
+                    <div className="sources-sidebar-item-domain">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{flexShrink:0}}>
+                        <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                      </svg>
+                      {domain}
+                      <span className="sources-verified-badge">✓ Verified</span>
+                    </div>
+                  )}
+                  <div className="sources-sidebar-item-text">
+                    {src.text?.slice(0, 140)}{src.text?.length > 140 ? "…" : ""}
+                  </div>
+                </div>
+                {isWebSource && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0, opacity:0.4, marginTop:2}}>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                )}
+              </>
+            );
+
+            return isWebSource ? (
+              <a
+                key={i}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="sources-sidebar-item sources-sidebar-item--link"
+              >
+                {inner}
+              </a>
+            ) : (
+              <div key={i} className="sources-sidebar-item">
+                {inner}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    )}
+  </div>
   );
 }

@@ -33,11 +33,15 @@ export function useLiveTranscript() {
       setLiveText(interim);
     };
 
-    let hasNetworkError = false;
+    let hasFatalError = false;
 
     recognition.onerror = (e) => {
       if (e.error === "network") {
         hasNetworkError = true;
+      }
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        hasFatalError = true;
+        isActiveRef.current = false;
       }
       if (e.error !== "no-speech" && e.error !== "aborted" && e.error !== "network") {
         console.warn("Speech recognition error:", e.error);
@@ -46,10 +50,10 @@ export function useLiveTranscript() {
 
     recognition.onend = () => {
       // browser auto-stops after a pause; restart if we're still supposed to be listening
-      if (isActiveRef.current) {
-        const delay = hasNetworkError ? 5000 : 300;
+      if (isActiveRef.current && !hasFatalError) {
+        const delay = hasNetworkError ? 5000 : 800;
         setTimeout(() => {
-          if (!isActiveRef.current) return;
+          if (!isActiveRef.current || hasFatalError) return;
           try {
             recognition.start();
           } catch (err) {

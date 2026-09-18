@@ -1,4 +1,5 @@
 import logging
+import asyncio
 
 from typing import Optional
 
@@ -23,6 +24,21 @@ from app.services.stt_service import STTService, UnsupportedLanguageError
 from app.services.tts_service import TTSService, TTSSynthesisError
 
 from app.services.system_agent import system_agent
+
+import hashlib
+from app.services.redis_service import redis_service
+from app.services.image_service import image_service
+from app.services.web_search_service import web_search, should_web_search, results_to_context
+from app.services.map_service import search_places, should_search_map
+
+_SMALLTALK_WORDS = {
+    "hi", "hello", "hey", "hlo", "hey kawaii", "good morning", "good afternoon", "good evening",
+    "who are you", "what is your name", "help", "thanks", "thank you", "ok", "okay"
+}
+
+def _is_smalltalk(user_text: str) -> bool:
+    cleaned = user_text.lower().strip().rstrip("!?.,")
+    return cleaned in _SMALLTALK_WORDS or len(cleaned) <= 3
 
 def _check_and_execute_system_action(user_text: str) -> Optional[str]:
     text_lower = user_text.lower()
@@ -123,6 +139,31 @@ async def send_message(
     sys_res = _check_and_execute_system_action(transcribed)
     if sys_res:
         system_context += f"\n\n[REAL-TIME SYSTEM CONTROL AGENT EXECUTION]:\n{sys_res}\nConfirm to the user that the Python script / command has been executed live on their system."
+
+    # Check for image generation or retrieval request
+    image_reply = await image_service.check_and_process_image_request(transcribed, llm_service, model_id)
+    if image_reply:
+        reply_text = image_reply
+        audio_url = None
+        response_audio_base64 = None
+        try:
+            audio_path = await tts_service.synthesize("Here is the image you requested.", filename_prefix="reply")
+            response_audio_base64 = await tts_service.audio_base64(audio_path)
+            audio_url = tts_service.audio_url(audio_path)
+        except Exception:
+            pass
+
+        conversation_manager.append_exchange(session_id, transcribed, reply_text)
+        return ApiResponse(
+            success=True,
+            data=ConversationMessageData(
+                transcribed_text=transcribed,
+                response_text=reply_text,
+                response_audio_url=audio_url,
+                response_audio_base64=response_audio_base64,
+                session_id=session_id,
+            ),
+        )
 
     try:
         # Always use the current global persona, not the one frozen at session start,
@@ -246,6 +287,22 @@ async def send_text_message(
     if sys_res:
         system_context += f"\n\n[REAL-TIME SYSTEM CONTROL AGENT EXECUTION]:\n{sys_res}\nConfirm to the user that the Python script / command has been executed live on their system."
 
+    # Check for image generation or retrieval request
+    image_reply = await image_service.check_and_process_image_request(message, llm_service, payload.model_id)
+    if image_reply:
+        reply_text = image_reply
+        conversation_manager.append_exchange(payload.session_id, message, reply_text)
+        return ApiResponse(
+            success=True,
+            data=ConversationMessageData(
+                transcribed_text=message,
+                response_text=reply_text,
+                response_audio_url=None,
+                response_audio_base64=None,
+                session_id=payload.session_id,
+            ),
+        )
+
     try:
         # Same persona lookup as voice mode: always the current global
         # persona, so Settings changes apply live to chatbot mode too.
@@ -305,6 +362,10 @@ async def send_text_message_stream(
     request: Request,
     payload: ConversationTextMessageRequest,
 ):
+    from langchain_core.messages import HumanMessage, AIMessage
+    from app.services.graph_service import graph_app
+    import json
+
     conversation_manager: ConversationManager = request.app.state.conversation_manager
     llm_service: LLMService = request.app.state.llm_service
     document_store: DocumentStore = request.app.state.document_store
@@ -324,31 +385,116 @@ async def send_text_message_stream(
         )
 
     history = conversation_manager.get_history(payload.session_id)
+    # Convert dict history to LangChain messages
+    lc_messages = []
+    for h in history:
+        if h["role"] == "user":
+            lc_messages.append(HumanMessage(content=h["content"]))
+        else:
+            lc_messages.append(AIMessage(content=h["content"]))
+            
+    lc_messages.append(HumanMessage(content=message))
 
-    relevant_chunks = document_store.get_context_chunks(message)
-    document_context = "\n\n---\n\n".join(
-        f'From "{chunk.doc_name}":\n{chunk.text}' for chunk in relevant_chunks
-    )
     system_context = f"Document status:\n{document_store.get_document_status_summary()}"
+    
+    # Resolve model config using llm_service's helper
+    model_name, api_key, base_url = llm_service._resolve_model_config(payload.model_id)
+
+    # Kick off web search concurrently if query warrants it (non-blocking)
+    web_search_task = None
+    if should_web_search(message):
+        web_search_task = asyncio.ensure_future(web_search(message, max_results=5))
+
+    # Kick off map search concurrently if query warrants it
+    map_search_task = None
+    if should_search_map(message):
+        map_search_task = asyncio.ensure_future(search_places(message, limit=5))
+
+    # Async wrapper for retriever
+    async def async_retriever(query: str):
+        return document_store.get_context_chunks(query)
+
+    state = {
+        "messages": lc_messages,
+        "persona_prompt": conversation_manager.get_persona(),
+        "system_context": system_context,
+        "model_name": model_name,
+        "api_key": api_key,
+        "base_url": base_url,
+        "retriever_func": async_retriever
+    }
 
     async def event_generator():
+        import asyncio as _asyncio
+        # Check for image generation or retrieval request before starting stream
+        image_reply = await image_service.check_and_process_image_request(message, llm_service, payload.model_id)
+        if image_reply:
+            conversation_manager.append_exchange(payload.session_id, message, image_reply)
+            yield f"event: content\ndata: {json.dumps(image_reply)}\n\n"
+            yield f"event: done\ndata: [DONE]\n\n"
+            return
+
         full_reply = ""
+        
+        # Gather web search results (started concurrently before LLM for speed)
+        web_results = []
+        if web_search_task is not None:
+            try:
+                web_results = await asyncio.wait_for(asyncio.shield(web_search_task), timeout=6.0)
+            except Exception:
+                logger.warning("Web search timed out or failed")
+                web_results = []
+
+        # Inject web context into state and yield sources before streaming answer
+        if web_results:
+            from app.services.web_search_service import results_to_context
+            web_ctx = results_to_context(web_results)
+            state["system_context"] = state.get("system_context", "") + "\n\n" + web_ctx
+            web_sources = [
+                {"doc_name": r["title"], "text": r["snippet"], "url": r["url"]}
+                for r in web_results if r.get("url")
+            ]
+            yield f"event: sources\ndata: {json.dumps(web_sources)}\n\n"
+
+        # Gather and yield map results
+        if map_search_task is not None:
+            try:
+                map_results = await asyncio.wait_for(asyncio.shield(map_search_task), timeout=5.0)
+                if map_results:
+                    yield f"event: map\ndata: {json.dumps(map_results)}\n\n"
+                    # Also inject into system context so LLM can talk about the places
+                    map_ctx = "--- FOUND LOCATIONS ---\n" + "\n".join([f"- {p['name']} ({p['display_name']})" for p in map_results["places"]])
+                    state["system_context"] = state.get("system_context", "") + "\n\n" + map_ctx
+            except Exception:
+                logger.warning("Map search timed out or failed")
+
         try:
-            async for chunk in llm_service.generate_stream(
-                persona_prompt=conversation_manager.get_persona(),
-                history=history,
-                user_message=message,
-                document_context=document_context,
-                system_context=system_context,
-                model_id=payload.model_id,
-            ):
-                full_reply += chunk
-                yield chunk
-            
+            # First, execute the graph using astream_events to get intermediate steps
+            async for event in graph_app.astream_events(state, version="v2"):
+                kind = event["event"]
+                # 1. Capture retrieved sources from the "retrieve" node output
+                if kind == "on_chain_end" and event["name"] == "retrieve":
+                    node_output = event["data"].get("output", {})
+                    sources = node_output.get("sources", [])
+                    if sources:
+                        # Yield sources event
+                        sources_list = [{"doc_name": s.doc_name, "text": s.text} for s in sources]
+                        yield f"event: sources\ndata: {json.dumps(sources_list)}\n\n"
+                        
+                # 2. Capture streaming tokens from ChatOpenAI
+                elif kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if chunk.content:
+                        full_reply += chunk.content
+                        # SSE requires data lines to not have naked newlines easily, so we JSON serialize the chunk text
+                        yield f"event: content\ndata: {json.dumps(chunk.content)}\n\n"
+                        
             # Save the fully generated message to history after streaming completes
             conversation_manager.append_exchange(payload.session_id, message, full_reply)
+            yield f"event: done\ndata: [DONE]\n\n"
+            
         except Exception as e:
-            logger.exception("LLM generation stream failed")
+            logger.exception("LangGraph stream failed")
             matcher_service = getattr(request.app.state, "matcher_service", None)
             fallback_answer = None
             if matcher_service:
@@ -358,18 +504,20 @@ async def send_text_message_stream(
 
             if fallback_answer:
                 conversation_manager.append_exchange(payload.session_id, message, fallback_answer)
-                yield fallback_answer
+                yield f"event: content\ndata: {json.dumps(fallback_answer)}\n\n"
+                yield f"event: done\ndata: [DONE]\n\n"
             else:
                 err_str = str(e)
                 if "invalid_api_key" in err_str.lower() or "invalid api key" in err_str.lower() or "403" in err_str:
-                    user_msg = "⚠️ **API Key Required**: The current Groq LLM API key is invalid or expired. Please update your API key in **Settings → Models** or set `GROQ_API_KEY` in your `.env` file."
+                    user_msg = "⚠️ **API Key Required**: The current LLM API key is invalid or expired. Please update your API key in **Settings → Models**."
                 elif "model_not_found" in err_str.lower() or "does not exist" in err_str.lower():
-                    user_msg = "⚠️ **Model Not Found**: The selected model is unavailable or the API key lacks access. Please select a valid model or update your API key in **Settings → Models**."
+                    user_msg = "⚠️ **Model Not Found**: The selected model is unavailable. Please select a valid model or update your API key in **Settings → Models**."
                 else:
                     user_msg = f"⚠️ **Response Error**: {err_str}"
-                yield user_msg
+                yield f"event: error\ndata: {json.dumps(user_msg)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/plain")
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/history", response_model=ApiResponse[ConversationHistoryData])

@@ -32,7 +32,7 @@ async def _sync_github(token: str, document_store: DocumentStore):
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "Lyx-AI-Agent"
+            "User-Agent": "Kawaii-AI-Agent"
         }
         
         # 1. Get User Info

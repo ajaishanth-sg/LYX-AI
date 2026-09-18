@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from app.services import db
+from app.services.redis_service import redis_service
 
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY_MESSAGES = 20  # keep last N messages (user+assistant) to control token usage
 MAX_ARCHIVED_CONVERSATIONS = 50  # cap how many past conversations we keep
+SESSION_CACHE_TTL = 86400  # 24 hours caching for active sessions
 
 @dataclass
 class ConversationSession:
@@ -42,12 +44,36 @@ class ConversationManager:
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
         session = ConversationSession(session_id=session_id, persona_prompt=self._active_persona_prompt)
         self._sessions[session_id] = session
+        
+        # Cache to Redis
+        redis_service.set_json(
+            f"lyx:session:{session_id}", 
+            {"history": session.history, "persona": session.persona_prompt}, 
+            ttl=SESSION_CACHE_TTL
+        )
+        
         db.create_session(session_id, self._active_persona_prompt, session.started_at.isoformat())
         logger.info("Started conversation session %s", session_id)
         return session
 
     def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        return self._sessions.get(session_id)
+        session = self._sessions.get(session_id)
+        if session:
+            return session
+            
+        # Try to restore active session from Redis Cache
+        cached = redis_service.get_json(f"lyx:session:{session_id}")
+        if cached:
+            restored_session = ConversationSession(
+                session_id=session_id, 
+                persona_prompt=cached.get("persona", "")
+            )
+            restored_session.history = cached.get("history", [])
+            self._sessions[session_id] = restored_session
+            logger.info("Restored conversation session %s from Redis cache", session_id)
+            return restored_session
+            
+        return None
 
     def end_session(self, session_id: str) -> bool:
         session = self._sessions.pop(session_id, None)
@@ -57,6 +83,9 @@ class ConversationManager:
         session.ended_at = datetime.now(timezone.utc)
         db.end_session(session_id, session.ended_at.isoformat())
         logger.info("Ended conversation session %s", session_id)
+        
+        # Remove from Redis cache since it's ended
+        redis_service.delete(f"lyx:session:{session_id}")
         
         # If no history, clean it up from DB
         if not session.history:
@@ -80,12 +109,20 @@ class ConversationManager:
         # trim to last MAX_HISTORY_MESSAGES to avoid unbounded growth / token blowup
         if len(session.history) > MAX_HISTORY_MESSAGES:
             session.history = session.history[-MAX_HISTORY_MESSAGES:]
+            
+        # Update Redis Cache
+        redis_service.set_json(
+            f"lyx:session:{session_id}", 
+            {"history": session.history, "persona": session.persona_prompt}, 
+            ttl=SESSION_CACHE_TTL
+        )
 
     def get_history(self, session_id: str) -> List[Dict[str, str]]:
-        session = self._sessions.get(session_id)
+        session = self.get_session(session_id)
         if session:
             return session.history
-        # If not active, try DB
+            
+        # Try DB as last resort
         return db.get_history(session_id)
 
     # ---- Past conversations (for the history popup) ----
