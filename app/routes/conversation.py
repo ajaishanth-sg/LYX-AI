@@ -14,6 +14,7 @@ from app.models.schemas import (
     ConversationMessageData,
     ConversationStartData,
     ConversationSummary,
+    ConversationSessionHistoryData,
     ConversationTextMessageRequest,
     ErrorDetail,
 )
@@ -398,7 +399,7 @@ async def send_text_message_stream(
     system_context = f"Document status:\n{document_store.get_document_status_summary()}"
     
     # Resolve model config using llm_service's helper
-    model_name, api_key, base_url = llm_service._resolve_model_config(payload.model_id)
+    model_name, api_key, base_url, resolved_model_id = llm_service._resolve_model_config(payload.model_id)
 
     # Kick off web search concurrently if query warrants it (non-blocking)
     web_search_task = None
@@ -436,13 +437,13 @@ async def send_text_message_stream(
 
         full_reply = ""
         
-        # Gather web search results (started concurrently before LLM for speed)
+        # Gather web search results (started concurrently before LLM for speed, capped at 2.5s)
         web_results = []
         if web_search_task is not None:
             try:
-                web_results = await asyncio.wait_for(asyncio.shield(web_search_task), timeout=6.0)
+                web_results = await asyncio.wait_for(asyncio.shield(web_search_task), timeout=2.5)
             except Exception:
-                logger.warning("Web search timed out or failed")
+                logger.warning("Web search timed out after 2.5s or failed")
                 web_results = []
 
         # Inject web context into state and yield sources before streaming answer
@@ -457,16 +458,17 @@ async def send_text_message_stream(
             yield f"event: sources\ndata: {json.dumps(web_sources)}\n\n"
 
         # Gather and yield map results
+        map_results = None
         if map_search_task is not None:
             try:
-                map_results = await asyncio.wait_for(asyncio.shield(map_search_task), timeout=5.0)
+                map_results = await asyncio.wait_for(asyncio.shield(map_search_task), timeout=2.5)
                 if map_results:
                     yield f"event: map\ndata: {json.dumps(map_results)}\n\n"
                     # Also inject into system context so LLM can talk about the places
                     map_ctx = "--- FOUND LOCATIONS ---\n" + "\n".join([f"- {p['name']} ({p['display_name']})" for p in map_results["places"]])
                     state["system_context"] = state.get("system_context", "") + "\n\n" + map_ctx
             except Exception:
-                logger.warning("Map search timed out or failed")
+                logger.warning("Map search timed out after 2.5s or failed")
 
         try:
             # First, execute the graph using astream_events to get intermediate steps
@@ -534,6 +536,13 @@ async def get_conversation_history(request: Request) -> ApiResponse[Conversation
         for s in sessions
     ]
     return ApiResponse(success=True, data=ConversationHistoryData(conversations=conversations))
+
+@router.get("/{session_id}/messages", response_model=ApiResponse[ConversationSessionHistoryData])
+async def get_single_conversation_history(request: Request, session_id: str) -> ApiResponse[ConversationSessionHistoryData]:
+    conversation_manager: ConversationManager = request.app.state.conversation_manager
+    history = conversation_manager.get_history(session_id)
+    messages = [ConversationMessage(role=m["role"], content=m["content"]) for m in history]
+    return ApiResponse(success=True, data=ConversationSessionHistoryData(messages=messages))
 
 @router.delete("/history/{session_id}", response_model=ApiResponse[ConversationDeleteData])
 async def delete_conversation_history(request: Request, session_id: str) -> ApiResponse[ConversationDeleteData]:

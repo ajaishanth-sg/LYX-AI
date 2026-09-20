@@ -34,6 +34,7 @@ export function useLiveTranscript() {
     };
 
     let hasFatalError = false;
+    let hasNetworkError = false;
 
     recognition.onerror = (e) => {
       if (e.error === "network") {

@@ -14,7 +14,8 @@ QA_BANK_PATH = DATA_DIR / "qa_bank.json"
 # -- it's the main reason short/quiet clips get misheard or hallucinated.
 # "small" is a solid accuracy/speed tradeoff on CPU; go to "medium" if your
 # machine can spare the RAM/CPU time and you want noticeably better accuracy.
-STT_MODEL_SIZE = "small"
+# "tiny" or "base" is much faster on CPU and reduces latency significantly.
+STT_MODEL_SIZE = "tiny"
 STT_DEVICE = "cpu"
 STT_COMPUTE_TYPE = "int8"
 
@@ -64,3 +65,11 @@ GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview"
 LLM_MAX_REPLY_TOKENS = 600
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/cubeai")
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/connectors/gmail/callback")
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/connectors/gmail/callback")

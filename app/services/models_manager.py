@@ -141,7 +141,9 @@ def add_model(
     is_visible: bool = True,
     max_input_tokens: Optional[int] = 128000,
     supports_image_input: bool = False,
-    supports_reasoning: bool = False
+    supports_reasoning: bool = False,
+    monthly_quota: int = 1000000,
+    quota_type: str = "monthly"
 ) -> Dict[str, Any]:
     models = load_models()
     target_id = name.lower().replace(" ", "-")
@@ -160,6 +162,8 @@ def add_model(
                 m["max_input_tokens"] = max_input_tokens
             m["supports_image_input"] = supports_image_input
             m["supports_reasoning"] = supports_reasoning
+            m["monthly_quota"] = monthly_quota
+            m["quota_type"] = quota_type
             updated = True
             target_model = m
             break
@@ -176,7 +180,9 @@ def add_model(
             "is_default": False,
             "max_input_tokens": max_input_tokens,
             "supports_image_input": supports_image_input,
-            "supports_reasoning": supports_reasoning
+            "supports_reasoning": supports_reasoning,
+            "monthly_quota": monthly_quota,
+            "quota_type": quota_type
         }
         models.append(target_model)
 

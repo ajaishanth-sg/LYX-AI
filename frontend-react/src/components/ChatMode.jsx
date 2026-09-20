@@ -5,10 +5,20 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "../index.css";
-import { BrainCircuit, Cpu } from "lucide-react";
+import { BrainCircuit, Cpu, FileText, FileSpreadsheet, Image as ImageIcon, Video, Music, File } from "lucide-react";
 import { useWeather } from "../hooks/useWeather";
+import { uploadDocument, getDocuments, deleteDocument } from "../services/api";
+import FilePreviewModal from "./FilePreviewModal";
+import ProductCarousel from "./ProductCarousel";
 
-// ── Icons ──────────────────────────────────────────────────────────
+
+
+const IconFile = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+    <polyline points="13 2 13 9 20 9"></polyline>
+  </svg>
+);
 const IconGlobe = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
@@ -313,12 +323,58 @@ const InputBox = ({
   onVoiceMode,
   models,
   activeModelId,
-  onSelectModel
+  onSelectModel,
+  documents,
+  setPreviewDoc,
+  handleRemoveDocument,
+  handleFileSelected,
+  uploadStatus
 }) => (
   <div className={homeStyle ? "home-input-wrap" : "chat-input-wrap"}>
     {errorMessage && <p className="chat-error-msg">{errorMessage}</p>}
-
+    
     <div className={homeStyle ? "home-input-box" : "chat-input-box"}>
+      {/* Document Chips above textarea */}
+      <div className="synapse-doc-chips" style={{ padding: "8px 16px 0 16px" }}>
+        {documents?.filter(d => 
+          !d.name.includes("GitHub Sync") && 
+          !d.name.includes("Web Scrape") && 
+          !d.name.toLowerCase().includes("sync") &&
+          !d.name.toLowerCase().includes("scrape")
+        ).map(doc => {
+          const ext = doc.name.split('.').pop().toLowerCase();
+          let DocIcon = File;
+          let iconColor = "var(--text-muted)";
+          if (ext === "pdf") { DocIcon = FileText; iconColor = "#e11d48"; }
+          else if (["xls", "xlsx", "csv"].includes(ext)) { DocIcon = FileSpreadsheet; iconColor = "#16a34a"; }
+          else if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) { DocIcon = ImageIcon; iconColor = "#2563eb"; }
+          else if (["mp4", "webm", "ogg", "mov"].includes(ext)) { DocIcon = Video; iconColor = "#9333ea"; }
+          else if (["mp3", "wav", "m4a"].includes(ext)) { DocIcon = Music; iconColor = "#ea580c"; }
+          
+          return (
+          <div key={doc.doc_id} className="synapse-doc-chip" onClick={() => setPreviewDoc(doc)}>
+            <div className="synapse-doc-icon" style={{ color: iconColor }}>
+              <DocIcon size={24} />
+            </div>
+            <span className="synapse-doc-name" title={doc.name}>{doc.name}</span>
+            {doc.status === "processing" && <span className="synapse-doc-processing">…</span>}
+            <button 
+              className="synapse-doc-remove" 
+              onClick={e => { e.stopPropagation(); handleRemoveDocument(doc.doc_id); }}
+              title="Remove file"
+            >
+              <IconX />
+            </button>
+          </div>
+          );
+        })}
+        {uploadStatus === "uploading" && (
+          <div className="synapse-doc-chip" style={{ opacity: 0.6 }}>
+            <span className="synapse-doc-name">Uploading...</span>
+          </div>
+        )}
+      </div>
+
       {/* Top: textarea */}
       <div className="home-input-top">
         <textarea
@@ -344,9 +400,16 @@ const InputBox = ({
           homeStyle={homeStyle}
         />
         <div className="home-input-icons">
+          <input 
+            type="file" 
+            id="chat-file-upload" 
+            style={{ display: "none" }} 
+            onChange={handleFileSelected} 
+            accept=".pdf,.docx,.txt,.md,.xlsx,.csv,.png,.jpg,.mp4,.mov,.avi,.mkv,.webm" 
+          />
           <button
             className="chat-input-icon-btn"
-            onClick={() => document.getElementById("global-file-upload")?.click()}
+            onClick={() => document.getElementById("chat-file-upload")?.click()}
             title="Attach file"
           >
             <IconPaperclip />
@@ -438,6 +501,10 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
   const [models, setModels] = useState([]);
   const [activeSources, setActiveSources] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [uploadStatus, setUploadStatus] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [previewDoc, setPreviewDoc] = useState(null);
   const scrollRef  = useRef(null);
   const textareaRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -457,8 +524,44 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
     };
     load();
     window.addEventListener("models-updated", load);
+    
+    getDocuments().then(docs => setDocuments(docs || [])).catch(console.error);
+
     return () => window.removeEventListener("models-updated", load);
   }, [activeModelId, onSelectModel]);
+
+  useEffect(() => {
+    if (documents.some((d) => d.status === "processing")) {
+      const id = setInterval(async () => {
+        try {
+          const docs = await getDocuments(); setDocuments(docs || []);
+          if (docs?.every(d => d.status === "ready" || d.status === "failed")) clearInterval(id);
+        } catch (e) { console.error(e); }
+      }, 2000);
+      return () => clearInterval(id);
+    }
+  }, [documents.length]);
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0]; e.target.value = "";
+    if (!file) return;
+    setUploadStatus("uploading"); setUploadError("");
+    try {
+      const r = await uploadDocument(file);
+      setDocuments(prev => [...prev, { doc_id: r.doc_id, name: r.name, chunk_count: 0, status: "processing", doc_type: r.doc_type }]);
+      setUploadStatus("");
+    } catch (err) { setUploadStatus("error"); setUploadError(err.message || "Upload failed."); }
+  };
+
+  const handleRemoveDocument = async (docId) => {
+    // Optimistic UI update: instantly remove from screen
+    setDocuments(prev => prev.filter(d => d.doc_id !== docId));
+    try { 
+      await deleteDocument(docId); 
+    } catch (e) { 
+      console.error("Failed to delete document on server:", e); 
+    }
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -470,11 +573,15 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
     return () => document.removeEventListener("mousedown", close);
   }, []);
 
-  // Auto scroll to bottom
+  // Auto scroll to bottom only when a new message is added
+  const lastMessageCount = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, isSending]);
+    if (el && messages.length > lastMessageCount.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+    lastMessageCount.current = messages.length;
+  }, [messages.length]);
 
   const handleSend = (text) => {
     const trimmed = (text ?? inputValue).trim();
@@ -531,7 +638,7 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
         {/* Input */}
         <InputBox 
           homeStyle={true} 
-          errorMessage={errorMessage}
+          errorMessage={errorMessage || uploadError}
           textareaRef={textareaRef}
           inputValue={inputValue}
           handleInput={handleInput}
@@ -545,6 +652,11 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
           models={models}
           activeModelId={activeModelId}
           onSelectModel={onSelectModel}
+          documents={documents}
+          setPreviewDoc={setPreviewDoc}
+          handleRemoveDocument={handleRemoveDocument}
+          handleFileSelected={handleFileSelected}
+          uploadStatus={uploadStatus}
         />
 
         {/* Quick actions */}
@@ -578,6 +690,8 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
             </div>
           )}
         </div>
+        
+        <FilePreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
       </div>
     );
   }
@@ -597,7 +711,7 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
             >
               {msg.role === "assistant" && (
                 <div className="chat-avatar" style={{ background: "transparent", border: "1px solid var(--border)", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
-                  <StrawhatIcon size={20} spinning={isSending && idx === messages.length - 1} />
+                  <StrawhatIcon size={20} spinning={false} />
                 </div>
               )}
               {msg.role === "user" ? (
@@ -608,10 +722,28 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                 <div className="chat-assistant-wrapper">
                   <div className="chat-bubble chat-bubble--assistant">
                     {msg.mapData && <MapPreview data={msg.mapData} />}
-                    {msg.content ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
+                    {(() => {
+                      let displayContent = msg.content || "";
+                      let productData = null;
+                      
+                      // Match the raw JSON array even if there are backticks inside or outside
+                      const carouselMatch = displayContent.match(/\[PRODUCT_CAROUSEL:\s*(\[.*?\])\s*\]/s);
+                      if (carouselMatch) {
+                        try {
+                          productData = JSON.parse(carouselMatch[1]);
+                          // Cleanly remove the block and any enclosing markdown code blocks
+                          displayContent = displayContent.replace(/```(?:json)?\s*\[PRODUCT_CAROUSEL:.*?\]\s*```/s, "");
+                          displayContent = displayContent.replace(/\[PRODUCT_CAROUSEL:.*?\]/s, "");
+                        } catch (e) {
+                          console.error("Failed to parse product carousel", e);
+                        }
+                      }
+                      return (
+                        <>
+                          {displayContent ? (
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
                           table: ({node, ...props}) => (
                             <div className="markdown-table-wrapper">
                               <table className="markdown-table" {...props} />
@@ -671,6 +803,17 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
 
                             return <a {...props} className="markdown-link" target="_blank" rel="noopener noreferrer" />;
                           },
+                          img: ({node, src, alt, ...props}) => {
+                            if (!src || src === "undefined" || src.trim() === "") {
+                              return (
+                                <span className="broken-image-placeholder" style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "12px 16px", background: "var(--bg-secondary)", borderRadius: "8px", border: "1px dashed var(--border)", color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  <ImageIcon size={16} />
+                                  <span>Image preview: {alt || "Not available"}</span>
+                                </span>
+                              );
+                            }
+                            return <img src={src} alt={alt} {...props} style={{ maxWidth: '100%', borderRadius: '8px' }} />;
+                          },
                           strong: ({node, ...props}) => <strong className="markdown-bold" {...props} />,
                           em: ({node, ...props}) => <em className="markdown-italic" {...props} />,
                           h1: ({node, ...props}) => <h1 className="markdown-h1" {...props} />,
@@ -687,9 +830,14 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                           )
                         }}
                       >
-                        {msg.content}
+                        {displayContent}
                       </ReactMarkdown>
-                    ) : (
+                      ) : null}
+                      {productData && <ProductCarousel products={productData} />}
+                    </>
+                  );
+                })()}
+                    {!msg.content && (
                       <div className="chat-typing" style={{ padding: "8px 0" }}>
                         {[0, 150, 300].map((d, i) => (
                           <div key={i} className="chat-typing-dot" style={{ animationDelay: `${d}ms` }} />
@@ -792,10 +940,45 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
               } catch (_) {}
             }
 
+            const docName = (src.doc_name || "").toLowerCase();
+
+            // Map known connector doc names to their official logo URLs
+            const CONNECTOR_LOGOS = {
+              gmail: "https://www.google.com/gmail/about/static-2.0/images/logo-gmail.png",
+              github: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+              notion: "https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png",
+              jira: "https://cdn.iconscout.com/icon/free/png-256/free-jira-3628779-3030141.png",
+              slack: "https://cdn.iconscout.com/icon/free/png-256/free-slack-226533.png",
+              dropbox: "https://cdn.iconscout.com/icon/free/png-256/free-dropbox-226536.png",
+              drive: "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png",
+              gdrive: "https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png",
+              confluence: "https://cdn.iconscout.com/icon/free/png-256/free-confluence-3628756-3030118.png",
+              discord: "https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png",
+              servicenow: "https://www.servicenow.com/content/dam/servicenow-assets/images/metatags/servicenow-logo.png",
+              gitlab: "https://about.gitlab.com/images/press/press-kit-icon.svg",
+            };
+
+            let connectorLogoUrl = "";
+            for (const [key, url] of Object.entries(CONNECTOR_LOGOS)) {
+              if (docName.includes(key)) {
+                connectorLogoUrl = url;
+                break;
+              }
+            }
+
             const inner = (
               <>
                 <div className="sources-sidebar-item-icon">
-                  {isWebSource && faviconUrl ? (
+                  {connectorLogoUrl ? (
+                    <img
+                      src={connectorLogoUrl}
+                      alt={src.doc_name}
+                      width="22"
+                      height="22"
+                      style={{ borderRadius: 4, objectFit: "contain" }}
+                      onError={e => { e.target.style.display = "none"; }}
+                    />
+                  ) : isWebSource && faviconUrl ? (
                     <img
                       src={faviconUrl}
                       alt={domain}
@@ -829,7 +1012,7 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
                     {src.text?.slice(0, 140)}{src.text?.length > 140 ? "…" : ""}
                   </div>
                 </div>
-                {isWebSource && (
+                {(isWebSource || connectorLogoUrl) && (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0, opacity:0.4, marginTop:2}}>
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                     <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
@@ -838,13 +1021,40 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
               </>
             );
 
-            return isWebSource ? (
+            // Build a clickable URL for connector sources
+            const CONNECTOR_URLS = {
+              gmail: "https://mail.google.com",
+              github: "https://github.com",
+              notion: "https://www.notion.so",
+              jira: "https://www.atlassian.com/software/jira",
+              slack: "https://app.slack.com",
+              dropbox: "https://www.dropbox.com",
+              drive: "https://drive.google.com",
+              gdrive: "https://drive.google.com",
+              confluence: "https://www.atlassian.com/software/confluence",
+              discord: "https://discord.com/channels/@me",
+              servicenow: "https://www.servicenow.com",
+              gitlab: "https://gitlab.com",
+            };
+
+            let connectorUrl = "";
+            for (const [key, url] of Object.entries(CONNECTOR_URLS)) {
+              if (docName.includes(key)) {
+                connectorUrl = url;
+                break;
+              }
+            }
+
+            const linkUrl = src.url || connectorUrl;
+
+            return linkUrl ? (
               <a
                 key={i}
-                href={src.url}
+                href={linkUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="sources-sidebar-item sources-sidebar-item--link"
+                title={`Open ${src.doc_name || "source"}`}
               >
                 {inner}
               </a>
@@ -857,6 +1067,8 @@ export default function ChatMode({ messages, isSending, errorMessage, onSend, on
         </div>
       </div>
     )}
+    
+    <FilePreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
   </div>
   );
 }

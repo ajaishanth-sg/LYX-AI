@@ -45,9 +45,25 @@ def init_db():
                         max_input_tokens INTEGER DEFAULT 128000,
                         supports_image_input BOOLEAN DEFAULT FALSE,
                         supports_reasoning BOOLEAN DEFAULT FALSE,
+                        monthly_quota INTEGER DEFAULT 1000000,
+                        quota_type TEXT DEFAULT 'monthly',
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                # Seamlessly add monthly_quota if it doesn't exist
+                try:
+                    cursor.execute("ALTER TABLE models_config ADD COLUMN monthly_quota INTEGER DEFAULT 1000000;")
+                except Exception:
+                    conn.rollback() # Ignore if column already exists
+                else:
+                    conn.commit()
+                # Seamlessly add quota_type if it doesn't exist
+                try:
+                    cursor.execute("ALTER TABLE models_config ADD COLUMN quota_type TEXT DEFAULT 'monthly';")
+                except Exception:
+                    conn.rollback() # Ignore if column already exists
+                else:
+                    conn.commit()
             conn.commit()
         logger.info(f"PostgreSQL database initialized successfully")
     except Exception as e:
@@ -58,7 +74,7 @@ def db_load_models() -> List[Dict[str, Any]]:
     try:
         with get_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning FROM models_config ORDER BY updated_at DESC")
+                cursor.execute("SELECT id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning, monthly_quota, quota_type FROM models_config ORDER BY updated_at DESC")
                 rows = cursor.fetchall()
                 if not rows:
                     return []
@@ -73,8 +89,8 @@ def db_save_models(models: List[Dict[str, Any]]) -> None:
             with conn.cursor() as cursor:
                 for m in models:
                     cursor.execute("""
-                        INSERT INTO models_config (id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO models_config (id, name, display_name, api_key, provider, base_url, is_visible, is_default, max_input_tokens, supports_image_input, supports_reasoning, monthly_quota, quota_type, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (id) DO UPDATE SET
                             name = EXCLUDED.name,
                             display_name = EXCLUDED.display_name,
@@ -86,12 +102,15 @@ def db_save_models(models: List[Dict[str, Any]]) -> None:
                             max_input_tokens = EXCLUDED.max_input_tokens,
                             supports_image_input = EXCLUDED.supports_image_input,
                             supports_reasoning = EXCLUDED.supports_reasoning,
+                            monthly_quota = EXCLUDED.monthly_quota,
+                            quota_type = EXCLUDED.quota_type,
                             updated_at = CURRENT_TIMESTAMP
                     """, (
                         m.get("id"), m.get("name"), m.get("display_name"), m.get("api_key", ""),
                         m.get("provider", "groq"), m.get("base_url", ""), m.get("is_visible", True),
                         m.get("is_default", False), m.get("max_input_tokens", 128000),
-                        m.get("supports_image_input", False), m.get("supports_reasoning", False)
+                        m.get("supports_image_input", False), m.get("supports_reasoning", False),
+                        m.get("monthly_quota", 1000000), m.get("quota_type", "monthly")
                     ))
             conn.commit()
     except Exception as e:

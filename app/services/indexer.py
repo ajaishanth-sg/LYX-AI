@@ -18,6 +18,8 @@ async def run_connector_sync(connector_id: str, credential: Dict[str, Any], docu
         await _sync_github(token, document_store)
     elif connector_id == "web":
         await _sync_web(token, document_store)
+    elif connector_id == "gmail":
+        await _sync_gmail(credential, document_store)
     else:
         logger.warning(f"Background sync for connector '{connector_id}' is not yet implemented.")
 
@@ -101,3 +103,78 @@ async def _sync_web(url: str, document_store: DocumentStore):
     except Exception as e:
         logger.error(f"Web Sync Error: {e}")
         document_store.mark_failed(doc.doc_id)
+
+async def _sync_gmail(credential: dict, document_store: DocumentStore):
+    """
+    Syncs the user's recent Gmail messages into the vector database.
+    Uses the Google access token to fetch messages via the Gmail REST API.
+    """
+    import base64
+    import re
+
+    doc_name = "Gmail Sync"
+    doc = document_store.add_document_pending(doc_name, doc_type="document")
+    
+    token = credential.get("token", "")
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    try:
+        # 1. Get user profile
+        profile_resp = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+            headers=headers, timeout=10
+        )
+        profile_resp.raise_for_status()
+        email_address = profile_resp.json().get("emailAddress", "Unknown")
+        
+        # 2. List recent messages (up to 50)
+        list_resp = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=50&q=in:inbox",
+            headers=headers, timeout=10
+        )
+        list_resp.raise_for_status()
+        message_list = list_resp.json().get("messages", [])
+        
+        document_store.set_total_pages(doc.doc_id, len(message_list))
+        
+        # Overview chunk
+        overview = f"Gmail Inbox for {email_address}. Fetched {len(message_list)} recent messages.\n\n"
+        await document_store.add_text_batch(doc.doc_id, overview, pages_in_batch=0)
+        
+        # 3. Fetch each message's metadata and snippet
+        for msg_ref in message_list:
+            msg_id = msg_ref["id"]
+            msg_resp = requests.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date",
+                headers=headers, timeout=10
+            )
+            if msg_resp.status_code != 200:
+                await document_store.add_text_batch(doc.doc_id, "", pages_in_batch=1)
+                continue
+            
+            msg_data = msg_resp.json()
+            headers_list = msg_data.get("payload", {}).get("headers", [])
+            
+            subject = next((h["value"] for h in headers_list if h["name"] == "Subject"), "(No Subject)")
+            sender  = next((h["value"] for h in headers_list if h["name"] == "From"), "Unknown Sender")
+            date    = next((h["value"] for h in headers_list if h["name"] == "Date"), "Unknown Date")
+            snippet = msg_data.get("snippet", "")
+            
+            content = (
+                f"Email from Gmail Inbox:\n"
+                f"Subject: {subject}\n"
+                f"From: {sender}\n"
+                f"Date: {date}\n"
+                f"Preview: {snippet}\n"
+            )
+            
+            await document_store.add_text_batch(doc.doc_id, content, pages_in_batch=1)
+            await asyncio.sleep(0.1)
+        
+        document_store.mark_ready(doc.doc_id)
+        logger.info(f"Gmail background sync complete for {email_address}.")
+        
+    except Exception as e:
+        logger.error(f"Gmail Sync Error: {e}")
+        document_store.mark_failed(doc.doc_id)
+

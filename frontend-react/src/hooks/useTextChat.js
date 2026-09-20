@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startConversation, endConversation, sendTextMessageStream } from "../services/api";
+import { startConversation, endConversation, sendTextMessageStream, getSessionMessages } from "../services/api";
 
 // Text-mode counterpart to useConversation. Uses the same session lifecycle
 // endpoints (start/end) as voice mode — a session is just a persona +
@@ -10,8 +10,11 @@ export function useTextChat(activeModelId) {
   const [messages, setMessages] = useState([]); // [{ role: "user" | "assistant", content }]
   const [isSending, setIsSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
-  const sessionIdRef = useRef(null);
+  
+  // Initialize sessionId from localStorage to persist across refreshes
+  const initialSessionId = typeof window !== "undefined" ? localStorage.getItem("lyx_active_session_id") : null;
+  const [sessionId, setSessionId] = useState(initialSessionId);
+  const sessionIdRef = useRef(initialSessionId);
 
   // Auto-clear error message after 2 seconds
   useEffect(() => {
@@ -23,11 +26,31 @@ export function useTextChat(activeModelId) {
     }
   }, [errorMessage]);
 
+  // Restore messages on initial load if session exists
+  useEffect(() => {
+    if (initialSessionId) {
+      getSessionMessages(initialSessionId)
+        .then((data) => {
+          if (data && data.messages) {
+            setMessages(data.messages);
+          } else {
+            // Session not found on backend (maybe deleted)
+            localStorage.removeItem("lyx_active_session_id");
+            setSessionId(null);
+            sessionIdRef.current = null;
+          }
+        })
+        .catch((err) => console.error("Failed to restore session history:", err));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const ensureSession = useCallback(async () => {
     if (sessionIdRef.current) return sessionIdRef.current;
     const data = await startConversation();
     sessionIdRef.current = data.session_id;
     setSessionId(data.session_id);
+    localStorage.setItem("lyx_active_session_id", data.session_id);
     return data.session_id;
   }, []);
 
@@ -149,6 +172,22 @@ export function useTextChat(activeModelId) {
     setSessionId(null);
     setMessages([]);
     setErrorMessage(null);
+    localStorage.removeItem("lyx_active_session_id");
+  }, []);
+
+  const loadSession = useCallback(async (newSessionId) => {
+    if (!newSessionId || newSessionId === "live") return;
+    try {
+      const data = await getSessionMessages(newSessionId);
+      if (data && data.messages) {
+        setMessages(data.messages);
+        setSessionId(newSessionId);
+        sessionIdRef.current = newSessionId;
+        localStorage.setItem("lyx_active_session_id", newSessionId);
+      }
+    } catch (err) {
+      console.error("Failed to load session:", err);
+    }
   }, []);
 
   return {
@@ -158,5 +197,6 @@ export function useTextChat(activeModelId) {
     sessionId,
     sendChatMessage,
     newChatConversation,
+    loadSession,
   };
 }

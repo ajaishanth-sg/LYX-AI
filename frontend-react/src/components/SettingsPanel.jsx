@@ -58,6 +58,8 @@ export default function SettingsPanel({ isOpen, onClose }) {
   const [modelName, setModelName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [monthlyQuota, setMonthlyQuota] = useState(1000000);
+  const [quotaType, setQuotaType] = useState("monthly");
   const [providerModels, setProviderModels] = useState([]);
   const [ollamaMode, setOllamaMode] = useState("local"); // "local" | "cloud"
 
@@ -148,6 +150,8 @@ export default function SettingsPanel({ isOpen, onClose }) {
     setModalProviderId(providerId);
     setModelName("");
     setApiKey("");
+    setMonthlyQuota(1000000);
+    setQuotaType("monthly");
     setOllamaMode("local");
     setBaseUrl(providerId === "ollama" ? "http://localhost:11434" : "");
     setIsModalOpen(true);
@@ -159,6 +163,8 @@ export default function SettingsPanel({ isOpen, onClose }) {
     setModelName(model.name);
     setApiKey(model.api_key || "");
     setBaseUrl(model.base_url || "");
+    setMonthlyQuota(model.monthly_quota ?? 1000000);
+    setQuotaType(model.quota_type || "monthly");
     setIsModalOpen(true);
   };
 
@@ -177,7 +183,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
     }
     setStatus("saving_model");
     try {
-      await createModel(modelName.trim(), apiKey.trim(), modalProviderId, baseUrl.trim());
+      await createModel(modelName.trim(), apiKey.trim(), modalProviderId, baseUrl.trim(), monthlyQuota, quotaType);
       setStatus("model_saved");
       fetchModels();
       window.dispatchEvent(new CustomEvent("models-updated"));
@@ -295,6 +301,21 @@ export default function SettingsPanel({ isOpen, onClose }) {
                               ) : (
                                 <span className="onyx-badge" style={{ background: '#fef3c7', color: '#b45309' }}>No Key</span>
                               )}
+                            </div>
+                            {/* Usage Progress Bar */}
+                            <div style={{ marginTop: '12px', padding: '0 4px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                                <span>{(m.tokens_used || 0).toLocaleString()} used / {Math.max(0, (m.monthly_quota || 1000000) - (m.tokens_used || 0)).toLocaleString()} remaining ({m.quota_type === 'daily' ? 'Today' : m.quota_type === 'total' ? 'Lifetime' : 'This Month'})</span>
+                                <span>{((m.tokens_used || 0) / (m.monthly_quota || 1000000) * 100).toFixed(1)}%</span>
+                              </div>
+                              <div style={{ width: '100%', height: '4px', background: 'var(--border-light, #e5e5e5)', borderRadius: '2px', overflow: 'hidden' }}>
+                                <div style={{ 
+                                  height: '100%', 
+                                  width: `${Math.min(100, ((m.tokens_used || 0) / (m.monthly_quota || 1000000) * 100))}%`, 
+                                  background: ((m.tokens_used || 0) / (m.monthly_quota || 1000000)) > 0.9 ? '#ef4444' : ((m.tokens_used || 0) / (m.monthly_quota || 1000000)) > 0.7 ? '#eab308' : '#10b981',
+                                  transition: 'width 0.3s ease'
+                                }} />
+                              </div>
                             </div>
                             <div style={{ display: 'flex', gap: '8px', marginTop: '16px', alignSelf: 'flex-end' }}>
                               <button className="onyx-btn-secondary" onClick={(e) => handleDeleteModel(e, m.id)} style={{ padding: '6px' }} title="Delete provider">
@@ -424,7 +445,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
                 <div>
                   <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>API Key</label>
                   <input 
-                    type="password" 
+                    type="text" 
                     className="settings-textarea" 
                     style={{ height: "40px", padding: "8px 12px" }}
                     placeholder="Your API Key"
@@ -450,8 +471,35 @@ export default function SettingsPanel({ isOpen, onClose }) {
                 </div>
               )}
 
-              {status === "model_saved" && <p className="settings-status settings-status-success" style={{ margin: 0 }}>Model saved successfully.</p>}
-              {status === "model_error" && <p className="settings-status settings-status-error" style={{ margin: 0 }}>Failed to save model.</p>}
+              <div style={{ display: "flex", gap: "16px", marginTop: "16px" }}>
+                <div style={{ flex: 1 }}>
+                  <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>Usage Quota Limit</label>
+                  <input 
+                    type="number" 
+                    className="settings-textarea" 
+                    style={{ height: "40px", padding: "8px 12px" }}
+                    placeholder="e.g. 1000000"
+                    value={monthlyQuota}
+                    onChange={(e) => setMonthlyQuota(parseInt(e.target.value) || 0)}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="settings-label" style={{ fontSize: "13px", marginBottom: "6px" }}>Reset Period</label>
+                  <select 
+                    className="settings-textarea" 
+                    style={{ height: "40px", padding: "8px 12px" }}
+                    value={quotaType}
+                    onChange={(e) => setQuotaType(e.target.value)}
+                  >
+                    <option value="daily">Daily Usage</option>
+                    <option value="monthly">Monthly Usage</option>
+                    <option value="total">Total Lifetime</option>
+                  </select>
+                </div>
+              </div>
+
+              {status === "model_saved" && <p className="settings-status settings-status-success" style={{ margin: 0, marginTop: "16px" }}>Model saved successfully.</p>}
+              {status === "model_error" && <p className="settings-status settings-status-error" style={{ margin: 0, marginTop: "16px" }}>Failed to save model.</p>}
             </div>
 
             <div className="onyx-modal-footer">

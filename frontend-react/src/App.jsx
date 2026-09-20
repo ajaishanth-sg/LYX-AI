@@ -1,6 +1,6 @@
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
-import AudioWaveform from "./components/AudioWaveform";
+import MyraaCoreVisualizer from "./components/MyraaCoreVisualizer";
 import LiveCaption from "./components/LiveCaption";
 import SettingsPanel from "./components/SettingsPanel";
 import AppearanceModal from "./components/AppearanceModal";
@@ -76,7 +76,7 @@ export default function App() {
 
   const {
     messages: chatMessages, isSending: isChatSending,
-    errorMessage: chatErrorMessage, sendChatMessage, newChatConversation,
+    errorMessage: chatErrorMessage, sendChatMessage, newChatConversation, loadSession,
   } = useTextChat(activeModelId);
 
   const handleConnectorData = (data) => {
@@ -90,6 +90,12 @@ export default function App() {
     }
     setMode("chat");
     await newChatConversation();
+  };
+
+  const handleSelectHistory = async (sessionId) => {
+    if (sessionId === "live") return;
+    setMode("chat");
+    await loadSession(sessionId);
   };
 
   const handleModeChange = async (nextMode) => {
@@ -117,6 +123,7 @@ export default function App() {
         chatMessages={chatMessages}
         activeModelId={activeModelId}
         onSelectModel={handleSelectModel}
+        onSelectHistory={handleSelectHistory}
       />
 
       {/* Main content */}
@@ -288,8 +295,11 @@ export default function App() {
             )}
 
             {/* STAGE HEADER */}
-            <div style={{ textAlign: "center", marginTop: "12px" }}>
-              <h1 className="voice-stage-title" style={{ fontSize: "24px", fontWeight: "600", letterSpacing: "0.05em" }}>Kawaii — Hands-Free Voice Agent</h1>
+            <div style={{ textAlign: "center", marginTop: "12px", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <img src="/logo.png" alt="Kawaii Logo" style={{ width: "48px", height: "48px", objectFit: "contain" }} />
+                <h1 className="voice-stage-title" style={{ fontSize: "28px", fontWeight: "600", letterSpacing: "0.05em", margin: 0 }}>Kawaii — Hands-Free Voice Agent</h1>
+              </div>
               {!isSessionActive && isWakeListening && (
                 <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", margin: "8px 0", padding: "4px 12px", borderRadius: "999px", background: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.3)", color: "#10b981", fontSize: "12px", fontWeight: "500" }}>
                   <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
@@ -299,7 +309,7 @@ export default function App() {
             </div>
 
             {/* WAVEFORM */}
-            <AudioWaveform status={isSessionActive ? vadStatus : "idle"} amplitude={amplitude} />
+            <MyraaCoreVisualizer status={isSessionActive ? vadStatus : "idle"} amplitude={amplitude} />
 
             {/* CONTROLS */}
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", marginBottom: "20px" }}>

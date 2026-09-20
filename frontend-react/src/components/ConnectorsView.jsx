@@ -178,6 +178,68 @@ export default function ConnectorsView() {
   const [connectedConfigs, setConnectedConfigs] = useState({});
   const [syncingMap, setSyncingMap] = useState({});
   const [showCredentialsEdit, setShowCredentialsEdit] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+
+  // Handle Google OAuth popup flow
+  const handleGoogleOAuth = () => {
+    setOauthLoading(true);
+    const popup = window.open(
+      "http://localhost:8000/api/connectors/google/login",
+      "GoogleOAuth",
+      "width=500,height=650,scrollbars=yes,resizable=yes"
+    );
+
+    const handleMessage = async (event) => {
+      if (event.data && event.data.type === "OAUTH_SUCCESS") {
+        window.removeEventListener("message", handleMessage);
+        popup && popup.close();
+        setOauthLoading(false);
+
+        const { token, refreshToken } = event.data.payload;
+        const creds = { token, refreshToken };
+        setCredentials(creds);
+
+        // Save connection and trigger background sync
+        setStatus("connecting");
+        try {
+          const { syncConnector } = await import("../services/api");
+          await syncConnector("gmail", creds);
+          const now = Date.now();
+          const updated = {
+            ...connectedConfigs,
+            gmail: {
+              credentials: creds,
+              autoSyncInterval,
+              connectedAt: now,
+              lastSyncedAt: now,
+            }
+          };
+          saveConfigs(updated);
+          setStatus("success");
+          setTimeout(() => {
+            setStatus("");
+            setSelectedPlugin(null);
+            setCredentials({});
+            setShowCredentialsEdit(false);
+          }, 2500);
+        } catch (err) {
+          setStatus("error");
+          alert("Failed to sync Gmail: " + err.message);
+        }
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    // Clean up if user closes popup without completing
+    const checkClosed = setInterval(() => {
+      if (popup && popup.closed) {
+        clearInterval(checkClosed);
+        window.removeEventListener("message", handleMessage);
+        setOauthLoading(false);
+      }
+    }, 500);
+  };
 
   // Load connected configs from localStorage
   useEffect(() => {
@@ -699,6 +761,50 @@ export default function ConnectorsView() {
                       />
                     </div>
                   </>
+                ) : selectedPlugin.id === "gmail" ? (
+                  /* Gmail: OAuth flow */
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", padding: "24px 0" }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "48px", marginBottom: "12px" }}>📧</div>
+                      <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700, color: "var(--text-primary)" }}>Connect with Google</h3>
+                      <p style={{ color: "var(--text-secondary)", fontSize: "14px", marginTop: "8px", maxWidth: "380px" }}>
+                        Sign in with your Google account to grant read-only access to Gmail, Google Drive, Calendar, and Photos.
+                        Your credentials are never stored — only an access token is used.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleGoogleOAuth}
+                      disabled={oauthLoading || status === "connecting"}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "12px 24px",
+                        borderRadius: "10px",
+                        background: "#ffffff",
+                        border: "1.5px solid #dadce0",
+                        boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+                        cursor: oauthLoading ? "not-allowed" : "pointer",
+                        fontSize: "15px",
+                        fontWeight: 600,
+                        color: "#3c4043",
+                        transition: "box-shadow 0.2s"
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                      </svg>
+                      {oauthLoading ? "Opening Google sign-in..." : status === "connecting" ? "Syncing emails..." : "Continue with Google"}
+                    </button>
+                    {status === "success" && (
+                      <p style={{ color: "#166534", background: "#dcfce7", padding: "10px 18px", borderRadius: "8px", fontWeight: 600 }}>
+                        ✓ Gmail connected! Indexing your emails in the background...
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div>
                     <label className="connector-label">
@@ -737,14 +843,16 @@ export default function ConnectorsView() {
                     Cancel
                   </button>
                 )}
-                <button
-                  className="connector-btn-primary"
-                  onClick={handleConnectOrUpdate}
-                  disabled={status === "connecting" || Object.keys(credentials).length === 0}
-                  style={{ background: selectedPlugin.color, padding: "10px 22px", borderRadius: "8px", border: "none", color: "#ffffff", fontWeight: 600, cursor: "pointer" }}
-                >
-                  {status === "connecting" ? "Connecting & Syncing..." : connectedConfigs[selectedPlugin.id] ? "Save Credentials & Sync" : "Connect Service"}
-                </button>
+                {selectedPlugin.id !== "gmail" && (
+                  <button
+                    className="connector-btn-primary"
+                    onClick={handleConnectOrUpdate}
+                    disabled={status === "connecting" || Object.keys(credentials).length === 0}
+                    style={{ background: selectedPlugin.color, padding: "10px 22px", borderRadius: "8px", border: "none", color: "#ffffff", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    {status === "connecting" ? "Connecting & Syncing..." : connectedConfigs[selectedPlugin.id] ? "Save Credentials & Sync" : "Connect Service"}
+                  </button>
+                )}
               </div>
 
               {status === "success" && <p className="connector-status-success" style={{ marginTop: "16px", padding: "12px", background: "#dcfce7", color: "#166534", borderRadius: "8px", textAlign: "center" }}>Connected! Syncing data into your workspace...</p>}

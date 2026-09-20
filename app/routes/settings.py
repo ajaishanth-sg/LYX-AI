@@ -35,12 +35,47 @@ async def get_provider_models(provider: str) -> ApiResponse[List[Dict[str, str]]
 
 @router.get("/models", response_model=ApiResponse[List[CustomModel]])
 async def get_models() -> ApiResponse[List[CustomModel]]:
+    from app.services.redis_service import redis_service
+    from datetime import datetime
+    today = datetime.now()
+    today_str = today.strftime('%Y-%m-%d')
+    month_str = today.strftime('%Y-%m')
     models = load_models()
+    for m in models:
+        model_id = m.get('id')
+        total = redis_service.get(f"lyx:usage:{model_id}:tokens")
+        daily = redis_service.get(f"lyx:usage:{model_id}:daily:{today_str}")
+        monthly = redis_service.get(f"lyx:usage:{model_id}:monthly:{month_str}")
+        
+        m["tokens_used_total"] = int(total) if total else 0
+        m["tokens_used_daily"] = int(daily) if daily else 0
+        m["tokens_used_monthly"] = int(monthly) if monthly else 0
+        
+        # Keep tokens_used for backwards compatibility, assign it based on quota_type
+        qt = m.get("quota_type", "monthly")
+        if qt == "daily":
+            m["tokens_used"] = m["tokens_used_daily"]
+        elif qt == "total":
+            m["tokens_used"] = m["tokens_used_total"]
+        else:
+            m["tokens_used"] = m["tokens_used_monthly"]
+            
+        if "monthly_quota" not in m:
+            m["monthly_quota"] = 1000000
+        if "quota_type" not in m:
+            m["quota_type"] = "monthly"
     return ApiResponse(success=True, data=models)
 
 @router.post("/models", response_model=ApiResponse[CustomModel])
 async def create_model(payload: CustomModelRequest) -> ApiResponse[CustomModel]:
-    model = add_model(payload.name, payload.api_key, payload.provider, payload.base_url)
+    model = add_model(
+        payload.name, payload.api_key, payload.provider, payload.base_url,
+        max_input_tokens=payload.max_input_tokens,
+        supports_image_input=payload.supports_image_input,
+        supports_reasoning=payload.supports_reasoning,
+        monthly_quota=payload.monthly_quota if payload.monthly_quota is not None else 1000000,
+        quota_type=payload.quota_type or "monthly"
+    )
     if payload.api_key and payload.api_key.strip():
         from app.services.redis_service import redis_service
         redis_service.set("lyx:global_api_key", payload.api_key.strip())

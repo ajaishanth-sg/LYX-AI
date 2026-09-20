@@ -11,9 +11,11 @@ IMAGE_CLASSIFICATION_PROMPT = """
 You are an image request classifier.
 The user's message might be asking to generate, show, or retrieve an image.
 Analyze the user's message and return a JSON object with the following fields:
-- "is_image_request": true if the user wants an image, false otherwise.
+- "is_image_request": true if the user explicitly wants an image, false otherwise.
 - "type": "retrieve" if it's a request for a real-world entity, animal, place, or existing concept. "generate" if it's a request for a surreal, imaginary, creative, or complex scene that requires AI generation.
 - "search_query": A clean, concise search term or prompt for the image (without conversational filler like "show me").
+
+CRITICAL RULE: If the user is asking to BUY something, or asking about PRODUCTS (e.g., "phone on amazon", "buy a dress", "flipkart", "shoes"), set "is_image_request" to FALSE. Products are handled by a different system.
 
 Example 1:
 User: "Show me a Siberian Husky"
@@ -24,7 +26,7 @@ User: "Create a realistic cat astronaut walking on Mars"
 Output: {"is_image_request": true, "type": "generate", "search_query": "realistic cat astronaut walking on Mars"}
 
 Example 3:
-User: "Hello, how are you?"
+User: "Show me a phone on Amazon"
 Output: {"is_image_request": false, "type": null, "search_query": null}
 
 Return ONLY valid JSON.
@@ -39,6 +41,17 @@ class ImageService:
         If yes, processes it via Retrieval or AI Generation and returns a Markdown response.
         If no, returns None.
         """
+        prompt_lower = user_prompt.lower()
+        image_keywords = ["image", "picture", "photo", "draw ", "generate a", "create a", "paint a"]
+        
+        # Don't intercept if they are asking for products
+        product_keywords = ["amazon", "flipkart", "myntra", "meesho", "buy", "price", "shop"]
+        if any(pk in prompt_lower for pk in product_keywords):
+            return None
+            
+        if not any(k in prompt_lower for k in image_keywords) and not prompt_lower.startswith("show me a "):
+            return None
+
         try:
             # 1. Classify the intent
             response_json_str = await llm_service.generate_reply_async(
@@ -105,18 +118,15 @@ class ImageService:
         return f"Here is the retrieved image:\n\n![{query}]({fallback_url})"
 
     async def _generate_image(self, query: str) -> str:
-        """Uses Hugging Face free Inference API to generate an image."""
+        """Uses Pollinations AI to generate an image."""
         import os
         import uuid
+        import urllib.parse
         from app.config import MEDIA_DIR
         
-        hf_token = os.getenv("HF_TOKEN")
-        if not hf_token:
-            return "⚠️ API Key missing: Please add HF_TOKEN to your .env file."
-            
-        url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
-        headers = {"Authorization": f"Bearer {hf_token}"}
-        payload = {"inputs": query}
+        encoded_query = urllib.parse.quote(query)
+        # Using Pollinations AI for reliable, free, keyless image generation
+        url = f"https://image.pollinations.ai/prompt/{encoded_query}?nologo=true&enhance=true"
         
         images_dir = MEDIA_DIR / "images"
         images_dir.mkdir(parents=True, exist_ok=True)
@@ -126,21 +136,17 @@ class ImageService:
         
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
-                response = await client.post(url, headers=headers, json=payload)
+                response = await client.get(url)
                 
-                if response.status_code == 503:
-                    # Model loading usually triggers 503 with estimated time
-                    logger.warning(f"HF API Model Loading: {response.text}")
-                    return "⚠️ The AI image model is currently waking up on Hugging Face. Please try again in about 30 seconds!"
-                elif response.status_code != 200:
-                    logger.error(f"HF API Error: {response.text}")
+                if response.status_code != 200:
+                    logger.error(f"Image API Error: {response.status_code}")
                     return f"⚠️ Failed to generate image (Status {response.status_code}). Try again in a few moments."
                     
                 with open(filepath, "wb") as f:
                     f.write(response.content)
                     
                 # The media endpoint in main.py mounts MEDIA_DIR at /media/responses
-                return f"Here is the AI-generated image (No Watermark):\n\n![AI Generated {query}](/media/responses/images/{filename})"
+                return f"Here is the AI-generated image:\n\n![AI Generated {query}](/media/responses/images/{filename})"
         except Exception as e:
             logger.error(f"Image generation failed: {e}")
             return "⚠️ Failed to connect to the image generation service."

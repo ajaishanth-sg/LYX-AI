@@ -96,6 +96,9 @@ class ConversationSummary(BaseModel):
 class ConversationHistoryData(BaseModel):
     conversations: List[ConversationSummary]
 
+class ConversationSessionHistoryData(BaseModel):
+    messages: List[ConversationMessage]
+
 class DocumentData(BaseModel):
     doc_id: str
     name: str
@@ -130,6 +133,12 @@ class CustomModel(BaseModel):
     max_input_tokens: Optional[int] = 128000
     supports_image_input: bool = False
     supports_reasoning: bool = False
+    monthly_quota: Optional[int] = 1000000
+    quota_type: Optional[str] = "monthly"
+    tokens_used: Optional[int] = 0
+    tokens_used_daily: Optional[int] = 0
+    tokens_used_monthly: Optional[int] = 0
+    tokens_used_total: Optional[int] = 0
 
 class CustomModelRequest(BaseModel):
     name: str
@@ -142,3 +151,5 @@ class CustomModelRequest(BaseModel):
     max_input_tokens: Optional[int] = 128000
     supports_image_input: bool = False
     supports_reasoning: bool = False
+    monthly_quota: Optional[int] = 1000000
+    quota_type: Optional[str] = "monthly"

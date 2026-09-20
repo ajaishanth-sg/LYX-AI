@@ -54,11 +54,11 @@ export async function getProviderModels(provider) {
   return handleResponse(res);
 }
 
-export async function createModel(name, apiKey, provider, baseUrl) {
+export async function createModel(name, apiKey, provider, baseUrl, monthlyQuota, quotaType) {
   const res = await fetch(`${API_BASE}/api/v1/settings/models`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, api_key: apiKey, provider, base_url: baseUrl }),
+    body: JSON.stringify({ name, api_key: apiKey, provider, base_url: baseUrl, monthly_quota: monthlyQuota, quota_type: quotaType }),
   });
   return handleResponse(res);
 }
@@ -144,6 +144,11 @@ export async function deleteDocument(docId) {
 
 export async function getConversationHistory() {
   const res = await fetch(`${API_BASE}/api/v1/conversation/history`);
+  return handleResponse(res);
+}
+
+export async function getSessionMessages(sessionId) {
+  const res = await fetch(`${API_BASE}/api/v1/conversation/${sessionId}/messages`);
   return handleResponse(res);
 }
 

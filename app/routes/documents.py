@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, Response
 
 from app.config import (
     MAX_VIDEO_DURATION_SECONDS,
@@ -268,7 +268,12 @@ async def upload_document(
             error=ErrorDetail(code="FILE_TOO_LARGE", message="Document exceeds the 32 MB limit."),
         )
 
-    document = document_store.add_document_pending(file.filename, doc_type="video" if is_video else "document")
+    document = document_store.add_document_pending(
+        file.filename, 
+        doc_type="video" if is_video else "document",
+        raw_bytes=content,
+        mime_type=file.content_type or "application/octet-stream"
+    )
 
     if is_video:
         background_tasks.add_task(
@@ -310,3 +315,11 @@ async def delete_document(request: Request, doc_id: str) -> ApiResponse[Document
             error=ErrorDetail(code="NOT_FOUND", message="Document not found."),
         )
     return ApiResponse(success=True, data=DocumentDeleteResult(deleted=True))
+
+@router.get("/{doc_id}/raw")
+async def get_document_raw(request: Request, doc_id: str):
+    document_store: DocumentStore = request.app.state.document_store
+    raw_bytes, mime_type = document_store.get_raw_file(doc_id)
+    if not raw_bytes:
+        return Response(content="File not found or no raw content stored.", status_code=404)
+    return Response(content=raw_bytes, media_type=mime_type)

@@ -36,13 +36,29 @@ class TTSService:
         loop and the /media/responses URL fallback keep working exactly as before."""
         filename = f"{filename_prefix}_{uuid.uuid4().hex[:12]}.mp3"
         output_path = self._output_dir / filename
+        
+        voice = self._voice
+        
+        # Simple heuristic character detection for multilingual TTS fallback
+        if any("\u0b80" <= c <= "\u0bff" for c in text): # Tamil
+            voice = "ta-IN-PallaviNeural"
+        elif any("\u0900" <= c <= "\u097f" for c in text): # Hindi
+            voice = "hi-IN-SwaraNeural"
+        elif any("\u4e00" <= c <= "\u9fff" for c in text): # Chinese
+            voice = "zh-CN-XiaoxiaoNeural"
+        elif any("\u3040" <= c <= "\u30ff" for c in text): # Japanese
+            voice = "ja-JP-NanamiNeural"
+        elif any("\u0600" <= c <= "\u06ff" for c in text): # Arabic
+            voice = "ar-SA-ZariyahNeural"
+        elif any("\u0400" <= c <= "\u04ff" for c in text): # Russian
+            voice = "ru-RU-SvetlanaNeural"
 
         last_error: Exception | None = None
         for attempt in range(1, TTS_MAX_ATTEMPTS + 1):
             try:
-                communicate = edge_tts.Communicate(text, self._voice)
+                communicate = edge_tts.Communicate(text, voice, rate="+25%")
                 await communicate.save(str(output_path))
-                logger.info("Generated TTS audio: %s (attempt %d)", output_path.name, attempt)
+                logger.info("Generated TTS audio: %s (attempt %d, voice %s)", output_path.name, attempt, voice)
                 return output_path
             except Exception as exc:  # noqa: BLE001
                 last_error = exc

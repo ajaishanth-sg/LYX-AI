@@ -35,6 +35,8 @@ class Document:
     total_pages: int = 0
     processed_pages: int = 0
     doc_type: str = "document"  # "document" | "video" -- lets callers (API/frontend/LLM context) know whether total_pages/processed_pages means pages or seconds
+    raw_bytes: Optional[bytes] = field(default=None, repr=False)
+    mime_type: str = "application/octet-stream"
 
     @property
     def progress_percent(self) -> int:
@@ -86,12 +88,19 @@ class DocumentStore:
     def get_ready_documents(self) -> List[Document]:
         return [doc for doc in self._documents.values() if doc.status == "ready"]
 
-    def add_document_pending(self, name: str, doc_type: str = "document") -> Document:
+    def add_document_pending(self, name: str, doc_type: str = "document", raw_bytes: Optional[bytes] = None, mime_type: str = "application/octet-stream") -> Document:
         doc_id = uuid.uuid4().hex[:12]
-        document = Document(doc_id=doc_id, name=name, chunk_count=0, status="processing", doc_type=doc_type)
+        document = Document(doc_id=doc_id, name=name, chunk_count=0, status="processing", doc_type=doc_type, raw_bytes=raw_bytes, mime_type=mime_type)
         self._documents[doc_id] = document
         logger.info("Added pending document '%s' (%s, type=%s)", name, doc_id, doc_type)
         return document
+
+    def get_raw_file(self, doc_id: str):
+        """Returns (bytes, mime_type) for a document, or (None, None) if not found."""
+        doc = self._documents.get(doc_id)
+        if doc and doc.raw_bytes:
+            return doc.raw_bytes, doc.mime_type
+        return None, None
 
     def set_total_pages(self, doc_id: str, total_pages: int) -> None:
         if doc_id in self._documents:

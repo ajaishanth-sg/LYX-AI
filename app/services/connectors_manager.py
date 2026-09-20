@@ -7,6 +7,7 @@ from app.services.connectors.notion import execute_notion_connector
 from app.services.connectors.jira import execute_jira_connector
 from app.services.connectors.servicenow import execute_servicenow_connector
 from app.services.connectors.dropbox import execute_dropbox_connector
+from app.services.connectors.gmail import execute_gmail_connector
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,13 @@ def execute_connector(connector_id: str, credential: Dict[str, Any]) -> Dict[str
         # 6. REAL INTEGRATION: Dropbox
         elif connector_id == "dropbox":
             text = execute_dropbox_connector(credential)
+            if text.startswith("Error:"):
+                return {"success": False, "text": "", "error": text}
+            return {"success": True, "text": text}
+
+        # 7. REAL INTEGRATION: Gmail (Google OAuth)
+        elif connector_id == "gmail":
+            text = execute_gmail_connector(token)
             if text.startswith("Error:"):
                 return {"success": False, "text": "", "error": text}
             return {"success": True, "text": text}

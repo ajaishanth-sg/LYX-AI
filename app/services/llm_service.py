@@ -18,12 +18,14 @@ logger = logging.getLogger(__name__)
 LLM_REQUEST_TIMEOUT_SECONDS = 20
 
 BASE_SYSTEM_INSTRUCTIONS = (
-    "You are Kawaii, a helpful AI assistant. "
-    "Always respond in clear, natural English regardless of what language the user writes in. "
-    "Keep responses conversational, clear, and well-structured. "
-    "FORMATTING & LISTING RULE: When the user asks for projects, repositories, or lists of items (e.g., 'give me the project in list', 'list my repos', 'show projects'), ALWAYS present them in a clean Markdown Table (`| Repository Name | Full Name | Description | Language | Stars |`). "
+    "You are Myraa, a highly energetic, expressive, and conversational AI assistant. "
+    "Always respond in clear, natural language regardless of what language the user writes in. "
+    "Keep responses conversational, concise, and highly human-like. Use natural emotional interjections and filler words (e.g. 'Oh!', 'Haha!', 'Hmm...', 'Wow!', 'Ah', 'Umm'). "
+    "Never be robotic or overly formal. Speak like a close, enthusiastic friend. "
+    "FORMATTING & LISTING RULE: When the user asks for projects, repositories, or lists of items, ALWAYS present them in a clean Markdown Table. Crucially, ALWAYS make the repository or project name a clickable markdown link to its URL (e.g., `| [Repo Name](https://...) | Description | Language | Stars |`) inside the table. "
+    "SHOPPING/PRODUCT RULE: When the user asks for products to buy (e.g., phones, mice, dresses on Amazon, Flipkart, Myntra), ALWAYS include a structured JSON block at the very end of your response like this: `[PRODUCT_CAROUSEL: [{\"name\": \"Product Name\", \"price\": \"₹Price\", \"description\": \"Short description\", \"image\": \"https://image-url.com/img.jpg\", \"url\": \"https://product-link.com/\", \"rating\": 4.5}]]`. Generate at least 3 realistic product recommendations. Make sure the image URLs are realistic placeholders (e.g., https://picsum.photos/400 or unspash source if you don't have the real image). "
     "Use standard Markdown for all formatting (headings, bold text, bullet points, tables). "
-    "Always finish your thought — never stop mid-sentence."
+    "Always finish your thought - never stop mid-sentence."
 )
 
 
@@ -58,7 +60,12 @@ class LLMService:
         document_context: str = "",
         system_context: str = "",
     ) -> List[Dict[str, str]]:
+        from app.services.memory_service import get_memory_context
+        memory_ctx = get_memory_context()
+        
         system_parts = [BASE_SYSTEM_INSTRUCTIONS, APP_RULES]
+        if memory_ctx:
+            system_parts.append(memory_ctx)
         if persona_prompt and persona_prompt.strip():
             system_parts.append(f"Persona instructions from admin:\n{persona_prompt.strip()}")
 
@@ -145,7 +152,7 @@ class LLMService:
             else:
                 model_name = raw_model_name
 
-        return model_name, api_key, base_url
+        return model_name, api_key, base_url, custom_model.get("id") if custom_model else model_id
 
     def generate_reply(
         self,
@@ -157,7 +164,7 @@ class LLMService:
         model_id: Optional[str] = None,
     ) -> str:
         messages = self._build_messages(persona_prompt, history, user_message, document_context, system_context)
-        model_name, api_key, base_url = self._resolve_model_config(model_id)
+        model_name, api_key, base_url, resolved_model_id = self._resolve_model_config(model_id)
 
         # Tamil script uses noticeably more tokens per word than English (dense
         # conjunct/combining characters), so even a generous fixed max_tokens can
@@ -173,6 +180,37 @@ class LLMService:
         full_reply_parts: List[str] = []
 
         for attempt in range(max_continuations + 1):
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "open_application",
+                        "description": "Opens an application on the user's computer.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "app_name": {"type": "string", "description": "Name of the application (e.g., whatsapp, calculator, notepad)."}
+                            },
+                            "required": ["app_name"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_memory",
+                        "description": "Saves a piece of critical user information to the persistent memory core.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "category": {"type": "string", "description": "Memory category (e.g., identity, preference, goal)."},
+                                "content": {"type": "string", "description": "The information to remember."}
+                            },
+                            "required": ["category", "content"]
+                        }
+                    }
+                }
+            ]
             response = litellm.completion(
                 model=model_name,
                 messages=messages,
@@ -180,11 +218,61 @@ class LLMService:
                 max_tokens=LLM_MAX_REPLY_TOKENS,
                 api_key=api_key,
                 base_url=base_url,
-                timeout=LLM_REQUEST_TIMEOUT_SECONDS
+                timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+                tools=tools
             )
             choice = response.choices[0]
+            
+            if hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
+                import json
+                from app.services.system_service import open_application
+                from app.services.memory_service import add_memory
+                
+                messages.append(choice.message.model_dump())
+                
+                for tool_call in choice.message.tool_calls:
+                    func_name = tool_call.function.name
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                        if func_name == "open_application":
+                            res = open_application(args.get("app_name"))
+                        elif func_name == "save_memory":
+                            res = add_memory(args.get("category"), args.get("content"))
+                        else:
+                            res = "Unknown function"
+                    except Exception as e:
+                        res = f"Error executing tool: {e}"
+                        
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": func_name,
+                        "content": str(res)
+                    })
+                
+                response = litellm.completion(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=LLM_MAX_REPLY_TOKENS,
+                    api_key=api_key,
+                    base_url=base_url,
+                    timeout=LLM_REQUEST_TIMEOUT_SECONDS
+                )
+                choice = response.choices[0]
+
             piece = (choice.message.content or "").strip()
             full_reply_parts.append(piece)
+            
+            if hasattr(response, "usage") and response.usage and resolved_model_id:
+                from app.services.redis_service import get_redis
+                from datetime import datetime
+                today = datetime.now()
+                r_client = get_redis()
+                if r_client:
+                    r_client.incrby(f"lyx:usage:{resolved_model_id}:daily:{today.strftime('%Y-%m-%d')}", response.usage.total_tokens)
+                    r_client.incrby(f"lyx:usage:{resolved_model_id}:monthly:{today.strftime('%Y-%m')}", response.usage.total_tokens)
+                    r_client.incrby(f"lyx:usage:{resolved_model_id}:tokens", response.usage.total_tokens)
 
             if choice.finish_reason != "length":
                 break
@@ -250,7 +338,7 @@ class LLMService:
         model_id: Optional[str] = None,
     ):
         messages = self._build_messages(persona_prompt, history, user_message, document_context, system_context)
-        model_name, api_key, base_url = self._resolve_model_config(model_id)
+        model_name, api_key, base_url, resolved_model_id = self._resolve_model_config(model_id)
 
         try:
             response = await litellm.acompletion(
@@ -264,9 +352,18 @@ class LLMService:
                 timeout=LLM_REQUEST_TIMEOUT_SECONDS
             )
             async for chunk in response:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    yield delta
+                content = chunk.choices[0].delta.content or ""
+                if hasattr(chunk, "usage") and chunk.usage and resolved_model_id:
+                    from app.services.redis_service import get_redis
+                    from datetime import datetime
+                    today = datetime.now()
+                    r_client = get_redis()
+                    if r_client:
+                        r_client.incrby(f"lyx:usage:{resolved_model_id}:daily:{today.strftime('%Y-%m-%d')}", chunk.usage.total_tokens)
+                        r_client.incrby(f"lyx:usage:{resolved_model_id}:monthly:{today.strftime('%Y-%m')}", chunk.usage.total_tokens)
+                        r_client.incrby(f"lyx:usage:{resolved_model_id}:tokens", chunk.usage.total_tokens)
+                if content:
+                    yield content
         except Exception as e:
             logger.error(f"Error in LLM stream generation: {e}")
             err_str = str(e)

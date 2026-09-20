@@ -1,12 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { deleteDocument, getDocuments, uploadDocument, getModels } from "../services/api";
-
-const UPLOAD_STATUS_MESSAGES = [
-  "Reading document…", "Collecting key details…",
-  "Understanding content…", "Splitting into chunks…",
-  "Indexing…", "Almost done…",
-];
-const UPLOAD_STATUS_INTERVAL_MS = 1800;
+import React, { useState, useEffect } from "react";
+import { getModels, getConversationHistory } from "../services/api";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const IconHome = () => (
@@ -72,64 +65,50 @@ const IconSettings = () => (
 
 export default function Sidebar({
   onNewConversation, onOpenSettings, onNavigateConnectors, onOpenProjects, onOpenAppearance,
-  chatMessages, activeModelId, onSelectModel
+  chatMessages, activeModelId, onSelectModel, onSelectHistory
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [documents, setDocuments] = useState([]);
   const [models, setModels] = useState([]);
-  const [uploadStatus, setUploadStatus] = useState("");
-  const [uploadError, setUploadError] = useState("");
-  const [uploadMessageIndex, setUploadMessageIndex] = useState(0);
-  const fileInputRef = useRef(null);
+  const [pastHistory, setPastHistory] = useState([]);
 
   useEffect(() => { 
-    refreshDocuments(); 
     refreshModels();
   }, []);
+  
+  // Refresh history when the chat clears (e.g. after clicking "New Chat") or on mount
   useEffect(() => {
-    if (documents.some((d) => d.status === "processing")) pollDocumentStatus();
-  }, [documents.length]);
-  useEffect(() => {
-    if (uploadStatus !== "uploading") return;
-    setUploadMessageIndex(0);
-    const id = setInterval(() => setUploadMessageIndex((i) => (i + 1) % UPLOAD_STATUS_MESSAGES.length), UPLOAD_STATUS_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [uploadStatus]);
+    if (chatMessages.length === 0) {
+      refreshHistory();
+    }
+  }, [chatMessages.length]);
 
-  const refreshDocuments = async () => {
-    try { setDocuments((await getDocuments()) || []); } catch (e) { console.error(e); }
+  const refreshHistory = async () => {
+    try {
+      const data = await getConversationHistory();
+      setPastHistory(data.conversations || []);
+    } catch (e) { console.error("Failed to load history:", e); }
   };
+
   const refreshModels = async () => {
     try { setModels((await getModels()) || []); } catch (e) { console.error(e); }
-  };
-  const handleFileSelected = async (e) => {
-    const file = e.target.files?.[0]; e.target.value = "";
-    if (!file) return;
-    setUploadStatus("uploading"); setUploadError("");
-    try {
-      const r = await uploadDocument(file);
-      setDocuments(prev => [...prev, { doc_id: r.doc_id, name: r.name, chunk_count: 0, status: "processing", doc_type: r.doc_type }]);
-      setUploadStatus(""); pollDocumentStatus();
-    } catch (err) { setUploadStatus("error"); setUploadError(err.message || "Upload failed."); }
-  };
-  const pollDocumentStatus = async () => {
-    const id = setInterval(async () => {
-      try {
-        const docs = await getDocuments(); setDocuments(docs || []);
-        if (docs?.every(d => d.status === "ready" || d.status === "failed")) clearInterval(id);
-      } catch (e) { console.error(e); }
-    }, 2000);
-    setTimeout(() => clearInterval(id), 300000);
-  };
-  const handleRemoveDocument = async (docId) => {
-    try { await deleteDocument(docId); setDocuments(prev => prev.filter(d => d.doc_id !== docId)); } catch (e) { console.error(e); }
   };
 
   // Merge real chat messages into history
   const liveHistoryItem = chatMessages.length > 0
     ? [{ id: "live", title: chatMessages[0].content.slice(0, 35) + (chatMessages[0].content.length > 35 ? "…" : ""), time: "Now", active: true }]
     : [];
-  const allHistory = [...liveHistoryItem];
+    
+  const pastHistoryItems = pastHistory.map(conv => {
+    const firstMsg = conv.messages.find(m => m.role === "user")?.content || "Empty chat";
+    return {
+      id: conv.session_id,
+      title: firstMsg.slice(0, 35) + (firstMsg.length > 35 ? "…" : ""),
+      time: new Date(conv.started_at).toLocaleDateString(),
+      active: false
+    };
+  });
+  
+  const allHistory = [...liveHistoryItem, ...pastHistoryItems];
 
   return (
     <aside className={`synapse-sidebar ${collapsed ? "synapse-sidebar--collapsed" : ""}`}>
@@ -138,7 +117,7 @@ export default function Sidebar({
         {!collapsed && (
           <div className="synapse-sidebar__brand">
             <div className="synapse-brand-icon">
-              <img src="/logo_transparent.png" alt="Kawaii AI" style={{ width: 24, height: 24, objectFit: "contain" }} />
+              <img src="/logo.png" alt="Kawaii AI" />
             </div>
             <span className="synapse-brand-name">Kawaii AI</span>
           </div>
@@ -176,35 +155,7 @@ export default function Sidebar({
             </button>
           </div>
 
-          {/* Folders */}
-          <div className="synapse-sidebar__section">
-            <div className="synapse-section-header">
-              <span className="synapse-section-label">Folder</span>
-              <button className="synapse-icon-btn synapse-icon-btn--sm" onClick={onOpenProjects} title="Add folder"><IconPlus /></button>
-            </div>
 
-            {(() => {
-              const userDocs = documents.filter(d => 
-                !d.name.includes("GitHub Sync") && 
-                !d.name.includes("Web Scrape") && 
-                !d.name.toLowerCase().includes("sync") &&
-                !d.name.toLowerCase().includes("scrape")
-              );
-              return userDocs.map(doc => (
-                <div key={doc.doc_id} className="synapse-nav-item synapse-doc-item"
-                  onMouseEnter={e => e.currentTarget.classList.add('synapse-nav-item--hovered')}
-                  onMouseLeave={e => e.currentTarget.classList.remove('synapse-nav-item--hovered')}
-                >
-                  <span className="synapse-nav-icon"><IconFolder /></span>
-                  <span className="synapse-doc-name">{doc.name}</span>
-                  {doc.status === "processing" && <span className="synapse-doc-processing">…</span>}
-                  <button className="synapse-doc-remove" onClick={e => { e.stopPropagation(); handleRemoveDocument(doc.doc_id); }}>
-                    <IconX />
-                  </button>
-                </div>
-              ));
-            })()}
-          </div>
 
           {/* Models (Hidden as they are now in Chat dropdown) */}
 
@@ -215,7 +166,7 @@ export default function Sidebar({
             </div>
             <div className="synapse-history-list">
               {allHistory.map(item => (
-                <button key={item.id} className={`synapse-history-item ${item.active ? "synapse-history-item--active" : ""}`}>
+                <button key={item.id} className={`synapse-history-item ${item.active ? "synapse-history-item--active" : ""}`} onClick={() => onSelectHistory && onSelectHistory(item.id)}>
                   <span className="synapse-history-title">{item.title}</span>
                 </button>
               ))}
@@ -223,8 +174,6 @@ export default function Sidebar({
           </div>
 
           {/* Upload error */}
-          {uploadError && <p className="synapse-upload-error">{uploadError}</p>}
-          <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt,.md,.xlsx,.csv,.png,.jpg,.mp4,.mov,.avi,.mkv,.webm" hidden onChange={handleFileSelected} id="global-file-upload" />
         </>
       )}
 
